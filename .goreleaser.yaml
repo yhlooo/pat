@@ -1,0 +1,78 @@
+# goreleaser 配置
+# 参考 https://goreleaser.com
+
+version: 2
+
+builds:
+  - id: pat-bin
+    binary: pat
+    main: "./cmd/pat"
+    env:
+      - "CGO_ENABLED=0"
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - "-X github.com/yhlooo/pat/pkg/version.Version={{ .Version }}"
+      - "-w"
+
+archives:
+  - format: "tar.gz"
+    name_template: "{{ .Binary }}-v{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+
+dockers:
+  - id: pat-image-linux-amd64
+    goos: linux
+    goarch: amd64
+    ids:
+      - pat-bin
+    image_templates:
+      - "ghcr.io/yhlooo/pat:latest-amd64"
+      - "ghcr.io/yhlooo/pat:v{{ .Version }}-amd64"
+    dockerfile: goreleaser.dockerfile
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.source=https://github.com/yhlooo/pat.git"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--platform=linux/amd64"
+  - id: pat-image-linux-arm64
+    goos: linux
+    goarch: arm64
+    ids:
+      - pat-bin
+    image_templates:
+      - "ghcr.io/yhlooo/pat:latest-arm64"
+      - "ghcr.io/yhlooo/pat:v{{ .Version }}-arm64"
+    dockerfile: goreleaser.dockerfile
+    build_flag_templates:
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.source=https://github.com/yhlooo/pat.git"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--platform=linux/arm64"
+docker_manifests:
+  - id: pat-image
+    name_template: "ghcr.io/yhlooo/pat:v{{ .Version }}"
+    image_templates:
+      - "ghcr.io/yhlooo/pat:v{{ .Version }}-amd64"
+      - "ghcr.io/yhlooo/pat:v{{ .Version }}-arm64"
+  - id: pat-image-latest
+    name_template: "ghcr.io/yhlooo/pat:latest"
+    image_templates:
+      - "ghcr.io/yhlooo/pat:latest-amd64"
+      - "ghcr.io/yhlooo/pat:latest-arm64"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^style:"
+      - "^chore:"
