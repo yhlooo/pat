@@ -13,6 +13,14 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// CommonClientInterface 通用客户端
+type CommonClientInterface interface {
+	// AuthInfo 获取认证信息
+	AuthInfo() AuthInfo
+	// SetAuthInfo 设置认证信息
+	SetAuthInfo(authInfo AuthInfo)
+}
+
 // NewCommonClient 创建通用客户端
 func NewCommonClient(authInfo AuthInfo) *CommonClient {
 	return &CommonClient{
