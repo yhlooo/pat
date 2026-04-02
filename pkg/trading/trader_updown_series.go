@@ -267,4 +267,12 @@ var (
 	ETHUpdown5m = Updown5m15m{AssetName: "eth", Interval: 5 * time.Minute}
 	// ETHUpdown15m eth-updown-15m
 	ETHUpdown15m = Updown5m15m{AssetName: "eth", Interval: 15 * time.Minute}
+
+	// AllUpdownSeries 所有涨或跌系列
+	AllUpdownSeries = map[string]UpdownSeries{
+		BTCUpdown5m.Slug():  BTCUpdown5m,
+		BTCUpdown15m.Slug(): BTCUpdown15m,
+		ETHUpdown5m.Slug():  ETHUpdown5m,
+		ETHUpdown15m.Slug(): ETHUpdown15m,
+	}
 )

@@ -3,6 +3,7 @@ package trading
 import (
 	"context"
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -38,7 +39,12 @@ func (ui *UI) Run(ctx context.Context) error {
 
 // Init 返回第一个操作
 func (ui *UI) Init() tea.Cmd {
-	return ui.receiveNextTradingStatus
+	return tea.Batch(
+		ui.receiveNextTradingStatus,
+		tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+			return TickMsg(t)
+		}),
+	)
 }
 
 // receiveNextTradingStatus 接收下一个交易状态
@@ -50,6 +56,8 @@ func (ui *UI) receiveNextTradingStatus() tea.Msg {
 	return status
 }
 
+type TickMsg time.Time
+
 // Update 处理更新事件
 func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch typed := msg.(type) {
@@ -58,8 +66,15 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			return ui, tea.Quit
 		}
+	case TickMsg:
+		return ui, tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+			return TickMsg(t)
+		})
 	case trading.Status:
 		ui.lastStatus = typed
+		if typed.MarketSlug != ui.curMarket.Slug {
+			ui.curMarket = ui.trader.Market()
+		}
 		return ui, ui.receiveNextTradingStatus
 	}
 
@@ -74,6 +89,8 @@ func (ui *UI) View() string {
 
 %s
 
+Timer: %s
+
 - %s
   - best bid: %s
   - best ask: %s
@@ -85,6 +102,7 @@ func (ui *UI) View() string {
 `,
 		ui.curMarket.Question, ui.curMarket.Slug,
 		ui.curMarket.Description,
+		ui.curMarket.EndDate.Sub(time.Now()).Round(time.Second).String(),
 		outcomes[0],
 		ui.lastStatus.Prices.Outcome1.BestBid.StringFixedBank(2),
 		ui.lastStatus.Prices.Outcome1.BestAsk.StringFixedBank(2),

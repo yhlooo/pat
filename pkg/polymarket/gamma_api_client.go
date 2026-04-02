@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // GammaAPIClient Gamma API 客户端
@@ -111,6 +112,7 @@ type Market struct {
 	Description   string            `json:"description"`
 	ConditionID   string            `json:"conditionId"`
 	Slug          string            `json:"slug"`
+	EndDate       time.Time         `json:"endDate"`
 	CLOBTokenIDs  string            `json:"clobTokenIds"`  // JSON 字符串数组
 	Outcomes      string            `json:"outcomes"`      // JSON 字符串数组，例如 ["Yes","No"]
 	OutcomePrices string            `json:"outcomePrices"` // JSON 字符串数组，例如 ["0.52","0.48"]

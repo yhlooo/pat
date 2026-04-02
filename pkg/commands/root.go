@@ -1,12 +1,14 @@
 package commands
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"text/template"
 	"time"
 
 	"github.com/bombsimon/logrusr/v4"
@@ -61,27 +63,55 @@ func (o *GlobalOptions) AddPFlags(fs *pflag.FlagSet) {
 
 // NewOptions 创建默认 Options
 func NewOptions() Options {
-	return Options{}
+	return Options{
+		DryRun: false,
+	}
 }
 
 // Options 运行选项
 type Options struct {
+	DryRun bool
 }
 
 // AddPFlags 将选项绑定到命令行参数
 func (o *Options) AddPFlags(fs *pflag.FlagSet) {
+	fs.BoolVar(
+		&o.DryRun, "dry-run", o.DryRun,
+		"The simulation runs and outputs the profit/loss results, but no actual transactions are made",
+	)
 }
+
+// exampleTpl 运行示例说明模版
+var exampleTpl = template.Must(template.New("Example").Parse(`
+# Start trading on series
+#
+# Available Series:
+# - btc-updown-5m:   Bitcoin Up or Down - 5 Minutes
+# - btc-updown-15m:  Bitcoin Up or Down - 15 Minutes
+# - eth-updown-5m:   Ethereum Up or Down - 5 Minutes
+# - eth-updown-15m:  Ethereum Up or Down - 15 Minutes
+{{ .CommandName }} btc-updown-5m
+
+# Dry run
+{{ .CommandName }} btc-updown-5m --dry-run
+`))
 
 // NewCommand 创建根命令
 func NewCommand(name string) *cobra.Command {
+	exampleBuf := new(bytes.Buffer)
+	_ = exampleTpl.Execute(exampleBuf, map[string]any{
+		"CommandName": name,
+	})
+
 	globalOpts := NewGlobalOptions()
 	opts := NewOptions()
 
 	var keylog *os.File
 	cmd := &cobra.Command{
-		Use:           fmt.Sprintf("%s [PROMPT]", name),
+		Use:           fmt.Sprintf("%s [SERIES_SLUG]", name),
 		Short:         i18n.T(MsgCmdShortDesc),
-		Args:          cobra.MaximumNArgs(1),
+		Example:       exampleBuf.String(),
+		Args:          cobra.ExactArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version.Version,
@@ -139,10 +169,14 @@ func NewCommand(name string) *cobra.Command {
 		},
 
 		RunE: func(cmd *cobra.Command, args []string) error {
+			series, ok := trading.AllUpdownSeries[args[0]]
+			if !ok {
+				return fmt.Errorf("series %q not found", args[0])
+			}
 			trader := trading.NewUpdownSeriesTrader(
-				trading.BTCUpdown5m,
+				series,
 				polymarket.NewClient(polymarket.AuthInfo{}),
-				trading.TraderOptions{DryRun: true},
+				trading.TraderOptions{DryRun: opts.DryRun},
 			)
 			ui := tradingui.NewUI(trader)
 			return ui.Run(cmd.Context())
