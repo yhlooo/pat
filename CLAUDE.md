@@ -26,8 +26,10 @@ PAT (Polymarket Automated Trading System) 是一个基于 Go 语言构建的 Pol
 │   └── pat  # 程序入口， main 包 
 └── pkg  # 代码
   ├── commands    # 命令行入口实现
+  ├── configs     # 配置系统实现
+  ├── i8n         # 国际化
   ├── polymarket  # Polymarket 客户端等实现
-  ├── ctxutil     # context 相关工具
+  ├── trading     # 监听市场、交易、策略实现
   ├── ui          # 用户交互界面实现
   # ... 其它包
 ```

@@ -1,0 +1,30 @@
+schema: spec-driven
+context: |
+  ## 项目简介
+  基于策略的 Polymarket 自动交易系统。
+
+  ## 技术栈
+  - 使用 go 编写
+  - 主要第三方库：
+    - 命令行入口： `github.com/spf13/cobra`
+    - TUI 框架： `github.com/charmbracelet/bubbletea`
+    - 日志： `github.com/go-logr/logr`
+    - 单元测试断言： `github.com/stretchr/testify`
+
+  ## 项目结构
+  ```
+  .
+  ├── cmd
+  │   └── pat  # 程序入口， main 包
+  └── pkg  # 代码
+    ├── commands    # 命令行入口实现
+    ├── configs     # 配置系统实现
+    ├── i8n         # 国际化
+    ├── polymarket  # Polymarket 客户端等实现
+    ├── trading     # 监听市场、交易、策略实现
+    ├── ui          # 用户交互界面实现
+    # ... 其它包
+  ```
+
+  ## 提案规范
+  - 所有 OpenSpec artifacts 都必须使用中文编写
