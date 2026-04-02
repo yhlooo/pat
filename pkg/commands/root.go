@@ -18,6 +18,9 @@ import (
 
 	"github.com/yhlooo/pat/pkg/configs"
 	"github.com/yhlooo/pat/pkg/i18n"
+	"github.com/yhlooo/pat/pkg/polymarket"
+	"github.com/yhlooo/pat/pkg/trading"
+	tradingui "github.com/yhlooo/pat/pkg/ui/trading"
 	"github.com/yhlooo/pat/pkg/version"
 )
 
@@ -136,7 +139,13 @@ func NewCommand(name string) *cobra.Command {
 		},
 
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			trader := trading.NewUpdownSeriesTrader(
+				trading.BTCUpdown5m,
+				polymarket.NewClient(polymarket.AuthInfo{}),
+				trading.TraderOptions{DryRun: true},
+			)
+			ui := tradingui.NewUI(trader)
+			return ui.Run(cmd.Context())
 		},
 
 		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {

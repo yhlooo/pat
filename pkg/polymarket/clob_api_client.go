@@ -6,15 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 // CLOBReaderClient CLOB 读 API 客户端
 type CLOBReaderClient interface {
 	// ConnectMarketChannel 连接市场频道
-	ConnectMarketChannel(ctx context.Context) (*websocket.Conn, error)
+	ConnectMarketChannel(ctx context.Context) (CLOBChannelConn, error)
 }
 
 // CLOBWriterClient CLOB 写 API 客户端
@@ -31,12 +33,16 @@ type CLOBWriterClient interface {
 	SendHeartbeat(ctx context.Context) (*HeartbeatStatus, error)
 }
 
-// CLOBChannelWatcher CLOB 频道监听器
-type CLOBChannelWatcher interface {
+// CLOBChannelConn CLOB 频道连接
+type CLOBChannelConn interface {
 	// SendSubscriptionRequest 开始订阅
 	SendSubscriptionRequest(ctx context.Context, req *CLOBSubscriptionRequest) error
 	// SendSubscriptionUpdate 更新订阅
 	SendSubscriptionUpdate(ctx context.Context, req *CLOBSubscriptionUpdateRequest) error
+	// Channel 获取接收事件的通道
+	Channel() <-chan *CLOBEvent
+	// Err 获取运行错误
+	Err() error
 }
 
 // CreateOrDeriveAPIKey 创建或派生 API 密钥
@@ -113,16 +119,130 @@ func (c *Client) SendHeartbeat(ctx context.Context) (*HeartbeatStatus, error) {
 }
 
 // ConnectMarketChannel 连接市场频道
-func (c *Client) ConnectMarketChannel(ctx context.Context) (*websocket.Conn, error) {
-	return c.ConnectWebSocket(ctx, &RawRequest{
+func (c *Client) ConnectMarketChannel(ctx context.Context) (CLOBChannelConn, error) {
+	conn, err := c.ConnectWebSocket(ctx, &RawRequest{
 		Method:   http.MethodGet,
 		Endpoint: CLOBWebSocketEndpoint,
 		URI:      "/ws/market",
 	})
+	if err != nil {
+		return nil, err
+	}
+	return NewCLOBChannelConn(ctx, conn), nil
 }
 
-// wsCLOBChannelWatcher 基于的 WebSocket 的 CLOB 频道监听器
-type wsCLOBChannelWatcher struct {
+// NewCLOBChannelConn 创建基于 WebSocket 的 CLOBChannelConn
+func NewCLOBChannelConn(ctx context.Context, conn *websocket.Conn) CLOBChannelConn {
+	w := &wsCLOBChannelConn{
+		conn:       conn,
+		eventsChan: make(chan *CLOBEvent),
+	}
+	go w.pingLoop(ctx)
+	go w.receiveLoop(ctx)
+	return w
+}
+
+// wsCLOBChannelConn 基于的 WebSocket 的 CLOB 频道连接
+type wsCLOBChannelConn struct {
+	conn       *websocket.Conn
+	err        error
+	eventsChan chan *CLOBEvent
+}
+
+var _ CLOBChannelConn = (*wsCLOBChannelConn)(nil)
+
+// SendSubscriptionRequest 开始订阅
+func (w *wsCLOBChannelConn) SendSubscriptionRequest(_ context.Context, req *CLOBSubscriptionRequest) error {
+	return w.conn.WriteJSON(req)
+}
+
+// SendSubscriptionUpdate 更新订阅
+func (w *wsCLOBChannelConn) SendSubscriptionUpdate(_ context.Context, req *CLOBSubscriptionUpdateRequest) error {
+	return w.conn.WriteJSON(req)
+}
+
+// pingLoop 发送 PING 的循环
+func (w *wsCLOBChannelConn) pingLoop(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	logger := logr.FromContextOrDiscard(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if err := w.conn.WriteControl(websocket.PingMessage, []byte("1"), time.Now().Add(3*time.Second)); err != nil {
+			if errors.Is(err, websocket.ErrCloseSent) || websocket.IsUnexpectedCloseError(err) {
+				w.err = fmt.Errorf("ping error: %w", err)
+				return
+			}
+			logger.Error(err, "ping error")
+		}
+	}
+}
+
+// receiveLoop 接收循环
+func (w *wsCLOBChannelConn) receiveLoop(ctx context.Context) {
+	logger := logr.FromContextOrDiscard(ctx).WithName("clob-channel-watcher")
+
+	logger.V(1).Info("clob channel receive loop started")
+
+	defer func() {
+		close(w.eventsChan)
+		_ = w.conn.Close()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			if w.err == nil {
+				w.err = ctx.Err()
+			}
+			logger.V(1).Info("clob channel receive loop done")
+			return
+		default:
+		}
+
+		_, raw, err := w.conn.ReadMessage()
+		if err != nil {
+			if w.err == nil {
+				w.err = fmt.Errorf("read message error: %w", err)
+			}
+			logger.V(1).Error(err, "read message from clob channel error")
+			return
+		}
+		logger.V(1).Info(fmt.Sprintf("received message: %s", string(raw)))
+
+		e := CLOBEvent{}
+		if err := json.Unmarshal(raw, &e); err != nil {
+			logger.V(1).Error(err, "unmarshal clob event from json error")
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			if w.err == nil {
+				w.err = ctx.Err()
+			}
+			logger.V(1).Info("clob channel receive loop done")
+			return
+		case w.eventsChan <- &e:
+		}
+	}
+}
+
+// Channel 获取接收事件的通道
+func (w *wsCLOBChannelConn) Channel() <-chan *CLOBEvent {
+	return w.eventsChan
+}
+
+// Err 获取运行错误
+func (w *wsCLOBChannelConn) Err() error {
+	return w.err
 }
 
 // APIKeyInfo API 密钥信息
@@ -137,6 +257,10 @@ type HeartbeatStatus struct {
 	Status string `json:"status"`
 }
 
+const (
+	SubTypeMarket = "market"
+)
+
 // CLOBSubscriptionRequest 订阅请求
 type CLOBSubscriptionRequest struct {
 	// 订阅资产 ID
@@ -148,7 +272,14 @@ type CLOBSubscriptionRequest struct {
 	InitialDump *bool `json:"initial_dump"`
 	// 订阅级别，默认 2
 	Level int `json:"level,omitempty"`
+	// 是否开启自定义特性
+	CustomFeatureEnabled bool `json:"custom_feature_enabled,omitempty"`
 }
+
+const (
+	OpSubscribe   = "subscribe"
+	OpUnsubscribe = "unsubscribe"
+)
 
 // CLOBSubscriptionUpdateRequest 订阅更新请求
 type CLOBSubscriptionUpdateRequest struct {
@@ -159,6 +290,8 @@ type CLOBSubscriptionUpdateRequest struct {
 	AssetIDs []string `json:"assets_ids"`
 	// 订阅级别，默认 2
 	Level int `json:"level,omitempty"`
+	// 是否开启自定义特性
+	CustomFeatureEnabled bool `json:"custom_feature_enabled,omitempty"`
 }
 
 // CLOBEvent CLOB 事件
@@ -174,6 +307,16 @@ type CLOBEvent struct {
 	MarketResolved    *MarketResolved    `json:"-"`
 }
 
+const (
+	EventBook           = "book"
+	EventPriceChange    = "price_change"
+	EventLastTradePrice = "last_trade_price"
+	EventTickSizeChange = "tick_size_change"
+	EventBestBidAsk     = "best_bid_ask"
+	EventNewMarket      = "new_market"
+	EventMarketResolved = "market_resolved"
+)
+
 // UnmarshalJSON 从 JSON 反序列化
 func (e *CLOBEvent) UnmarshalJSON(data []byte) error {
 	meta := CLOBEventMeta{}
@@ -185,25 +328,25 @@ func (e *CLOBEvent) UnmarshalJSON(data []byte) error {
 
 	var err error
 	switch meta.EventType {
-	case "book":
+	case EventBook:
 		e.OrderbookSnapshot = &OrderbookSnapshot{}
 		err = json.Unmarshal(data, e.OrderbookSnapshot)
-	case "price_change":
+	case EventPriceChange:
 		e.PriceChange = &PriceChange{}
 		err = json.Unmarshal(data, e.PriceChange)
-	case "last_trade_price":
+	case EventLastTradePrice:
 		e.LastTradePrice = &LastTradePrice{}
 		err = json.Unmarshal(data, e.LastTradePrice)
-	case "tick_size_change":
+	case EventTickSizeChange:
 		e.TickSizeChange = &TickSizeChange{}
 		err = json.Unmarshal(data, e.TickSizeChange)
-	case "best_bid_ask":
+	case EventBestBidAsk:
 		e.BestBidOrAsk = &BestBidOrAsk{}
 		err = json.Unmarshal(data, e.BestBidOrAsk)
-	case "new_market":
+	case EventNewMarket:
 		e.NewMarket = &NewMarket{}
 		err = json.Unmarshal(data, e.NewMarket)
-	case "market_resolved":
+	case EventMarketResolved:
 		e.MarketResolved = &MarketResolved{}
 		err = json.Unmarshal(data, e.MarketResolved)
 	}
@@ -237,8 +380,8 @@ type OrderbookSnapshot struct {
 
 // PriceLevel 分档价格
 type PriceLevel struct {
-	Price string `json:"price"`
-	Size  string `json:"size"`
+	Price decimal.Decimal `json:"price"`
+	Size  decimal.Decimal `json:"size"`
 }
 
 // PriceChange 价格变化事件
@@ -249,24 +392,24 @@ type PriceChange struct {
 
 // AssetPriceChange 价格变化
 type AssetPriceChange struct {
-	AssetID string `json:"asset_id"`
-	Price   string `json:"price"`
-	Size    string `json:"size"`
+	AssetID string          `json:"asset_id"`
+	Price   decimal.Decimal `json:"price"`
+	Size    decimal.Decimal `json:"size"`
 	// 交易方向
 	// BUY / SELL
-	Side    string `json:"side"`
-	Hash    string `json:"hash"`
-	BestBid string `json:"best_bid"`
-	BestAsk string `json:"best_ask"`
+	Side    string          `json:"side"`
+	Hash    string          `json:"hash"`
+	BestBid decimal.Decimal `json:"best_bid"`
+	BestAsk decimal.Decimal `json:"best_ask"`
 }
 
 // LastTradePrice 最近成交价事件
 type LastTradePrice struct {
-	AssetID    string `json:"asset_id"`
-	Market     string `json:"market"`
-	Price      string `json:"price"`
-	Size       string `json:"size"`
-	FeeRateBps string `json:"fee_rate_bps"`
+	AssetID    string          `json:"asset_id"`
+	Market     string          `json:"market"`
+	Price      decimal.Decimal `json:"price"`
+	Size       decimal.Decimal `json:"size"`
+	FeeRateBps decimal.Decimal `json:"fee_rate_bps"`
 	// 交易方向
 	// BUY / SELL
 	Side string `json:"side"`
@@ -276,19 +419,19 @@ type LastTradePrice struct {
 
 // TickSizeChange 市场最小价格变动单位更新事件
 type TickSizeChange struct {
-	AssetID     string `json:"asset_id"`
-	Market      string `json:"market"`
-	OldTickSize string `json:"old_tick_size"`
-	NewTickSize string `json:"new_tick_size"`
+	AssetID     string          `json:"asset_id"`
+	Market      string          `json:"market"`
+	OldTickSize decimal.Decimal `json:"old_tick_size"`
+	NewTickSize decimal.Decimal `json:"new_tick_size"`
 }
 
 // BestBidOrAsk 最佳出价/要价更新事件
 type BestBidOrAsk struct {
-	AssetID string `json:"asset_id"`
-	Market  string `json:"market"`
-	BestBid string `json:"best_bid"`
-	BestAsk string `json:"best_ask"`
-	Spread  string `json:"spread"`
+	AssetID string          `json:"asset_id"`
+	Market  string          `json:"market"`
+	BestBid decimal.Decimal `json:"best_bid"`
+	BestAsk decimal.Decimal `json:"best_ask"`
+	Spread  decimal.Decimal `json:"spread"`
 }
 
 // NewMarket 新市场事件

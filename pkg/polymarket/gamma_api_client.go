@@ -2,6 +2,7 @@ package polymarket
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 )
@@ -110,7 +111,7 @@ type Market struct {
 	Description   string            `json:"description"`
 	ConditionID   string            `json:"conditionId"`
 	Slug          string            `json:"slug"`
-	ClobTokenIDs  string            `json:"clobTokenIds"`  // JSON 字符串数组
+	CLOBTokenIDs  string            `json:"clobTokenIds"`  // JSON 字符串数组
 	Outcomes      string            `json:"outcomes"`      // JSON 字符串数组，例如 ["Yes","No"]
 	OutcomePrices string            `json:"outcomePrices"` // JSON 字符串数组，例如 ["0.52","0.48"]
 	Volume        float64           `json:"volumeNum,omitempty"`
@@ -121,6 +122,18 @@ type Market struct {
 	Active        bool              `json:"active,omitempty"`
 	Closed        bool              `json:"closed,omitempty"`
 	Events        []MarketEventData `json:"events,omitempty"`
+}
+
+// GetCLOBTokenIDs 获取 CLOB Token ID 列表
+func (m Market) GetCLOBTokenIDs() ([2]string, error) {
+	var ret [2]string
+	return ret, json.Unmarshal([]byte(m.CLOBTokenIDs), &ret)
+}
+
+// GetOutcomes 获取结果名列表
+func (m Market) GetOutcomes() ([2]string, error) {
+	var ret [2]string
+	return ret, json.Unmarshal([]byte(m.Outcomes), &ret)
 }
 
 // MarketEventData 市场关联的事件信息
