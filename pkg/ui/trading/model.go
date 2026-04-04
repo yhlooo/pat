@@ -89,6 +89,9 @@ func (ui *UI) View() string {
 
 %s
 
+Resolution Source: %s
+- Value: %s
+
 Timer: %s
 
 - %s
@@ -102,6 +105,8 @@ Timer: %s
 `,
 		ui.curMarket.Question, ui.curMarket.Slug,
 		ui.curMarket.Description,
+		ui.lastStatus.ResolutionSource.URL,
+		ui.lastStatus.ResolutionSource.Value,
 		ui.curMarket.EndDate.Sub(time.Now()).Round(time.Second).String(),
 		outcomes[0],
 		ui.lastStatus.Prices.Outcome1.BestBid.StringFixedBank(2),

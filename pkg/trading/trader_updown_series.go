@@ -88,12 +88,6 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 		return
 	}
 
-	// 开始监听市场
-	logger.Info(fmt.Sprintf("watching market: %s (%s)", curMarket.Slug, curMarket.ConditionID))
-	marketWatcher := polymarket.NewMarketWatcher(trader.client, curAssetIDs[:])
-	marketWatcher.Start(ctx)
-	defer func() { _ = marketWatcher.Close() }()
-
 	status := Status{
 		MarketSlug: curMarket.Slug,
 		Prices: MarketPrices{
@@ -108,12 +102,50 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 				Last:    decimal.New(49, -2),
 			},
 		},
+		ResolutionSource: ResolutionSource{
+			URL: curMarket.ResolutionSource,
+		},
+	}
+
+	// 开始监听市场
+	logger.Info(fmt.Sprintf("watching market: %s (%s)", curMarket.Slug, curMarket.ConditionID))
+	marketWatcher := polymarket.NewMarketWatcher(trader.client, curAssetIDs[:])
+	marketWatcher.Start(ctx)
+	defer func() { _ = marketWatcher.Close() }()
+
+	// 开始监听 rtds
+	var rtdsWatcherChan <-chan *polymarket.RTDSEvent
+	resolutionSourceSymbol := trader.series.ResolutionSourceSymbol()
+	if resolutionSourceSymbol != "" {
+		rtdsWatcher := polymarket.NewRTDSWatcher(trader.client, []polymarket.RTDSSubscription{
+			trader.series.ResolutionSourceSubscription(),
+		})
+		rtdsWatcher.Start(ctx)
+		defer func() { _ = rtdsWatcher.Close() }()
+
+		rtdsWatcherChan = rtdsWatcher.Channel()
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case event, ok := <-rtdsWatcherChan:
+			if !ok {
+				err := fmt.Errorf("rtds watcher channel closed")
+				logger.Error(err, err.Error())
+				return
+			}
+
+			if event.Payload.Symbol != resolutionSourceSymbol {
+				logger.V(1).Info(fmt.Sprintf(
+					"ignore unknown symbol price change, symbol: %s",
+					event.Payload.Symbol,
+				))
+				continue
+			}
+			status.ResolutionSource.Value = decimal.NewFromFloat(event.Payload.Value)
+
 		case event, ok := <-marketWatcher.Channel():
 			if !ok {
 				err := fmt.Errorf("market watcher channel closed")
@@ -181,12 +213,6 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 				continue
 			}
 
-			// 发送当前状态
-			select {
-			case trader.statusChan <- status:
-			default:
-			}
-
 		case <-ticker.C:
 			// 检查是否需要订阅新市场
 			newMarketSlug := trader.series.ActiveMarketSlugForTime(time.Now())
@@ -203,12 +229,19 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 			notResolvedMarkets[newMarket.ConditionID] = newMarket
 			curMarket = newMarket
 			trader.lock.Unlock()
+			status.MarketSlug = newMarket.Slug
 			curAssetIDs, err = curMarket.GetCLOBTokenIDs()
 			if err != nil {
 				logger.Error(err, fmt.Sprintf("get sub assets ids for market %q error", curMarket.Slug))
 				return
 			}
 			marketWatcher.Subscribe(ctx, curAssetIDs[:]...)
+		}
+
+		// 发送当前状态
+		select {
+		case trader.statusChan <- status:
+		default:
 		}
 	}
 }
@@ -240,6 +273,10 @@ type UpdownSeries interface {
 	Slug() string
 	// ActiveMarketSlugForTime 获取指定时间活跃的市场 slug
 	ActiveMarketSlugForTime(t time.Time) string
+	// ResolutionSourceSymbol 判定来源资产代号
+	ResolutionSourceSymbol() string
+	// ResolutionSourceSubscription 判定来源资产 RTDS 订阅
+	ResolutionSourceSubscription() polymarket.RTDSSubscription
 }
 
 // Updown5m15m 5 分钟或 15 分钟涨跌系列
@@ -256,6 +293,26 @@ func (s Updown5m15m) Slug() string {
 // ActiveMarketSlugForTime 获取指定时间活跃的市场 slug
 func (s Updown5m15m) ActiveMarketSlugForTime(t time.Time) string {
 	return s.Slug() + "-" + strconv.FormatInt(t.Round(s.Interval).Unix(), 10)
+}
+
+// ResolutionSourceSymbol 判定来源资产代号
+func (s Updown5m15m) ResolutionSourceSymbol() string {
+	switch s.AssetName {
+	case "btc", "eth":
+		return s.AssetName + "/usd"
+	}
+	// TODO: 其它暂不支持
+	return ""
+}
+
+// ResolutionSourceSubscription 判定来源资产 RTDS 订阅
+func (s Updown5m15m) ResolutionSourceSubscription() polymarket.RTDSSubscription {
+	// TODO: 目前只确认了 btc 和 eth 是这样订阅
+	return polymarket.RTDSSubscription{
+		Topic:   "crypto_prices_chainlink",
+		Type:    "*",
+		Filters: fmt.Sprintf(`{"symbol":"%s/usd"}`, s.AssetName),
+	}
 }
 
 var (

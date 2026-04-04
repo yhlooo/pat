@@ -31,6 +31,8 @@ type Status struct {
 	MarketSlug string
 	// 当前市场价格信息
 	Prices MarketPrices
+	// 判定来源
+	ResolutionSource ResolutionSource
 }
 
 // MarketPrices 市场价格信息
@@ -39,6 +41,12 @@ type MarketPrices struct {
 	Outcome1 AssetPrices
 	// 结果 2 价格
 	Outcome2 AssetPrices
+}
+
+// ResolutionSource 判定来源
+type ResolutionSource struct {
+	URL   string
+	Value decimal.Decimal
 }
 
 // AssetPrices 资产价格信息

@@ -107,23 +107,24 @@ type Series struct {
 
 // Market 市场信息
 type Market struct {
-	ID            string            `json:"id"`
-	Question      string            `json:"question"`
-	Description   string            `json:"description"`
-	ConditionID   string            `json:"conditionId"`
-	Slug          string            `json:"slug"`
-	EndDate       time.Time         `json:"endDate"`
-	CLOBTokenIDs  string            `json:"clobTokenIds"`  // JSON 字符串数组
-	Outcomes      string            `json:"outcomes"`      // JSON 字符串数组，例如 ["Yes","No"]
-	OutcomePrices string            `json:"outcomePrices"` // JSON 字符串数组，例如 ["0.52","0.48"]
-	Volume        float64           `json:"volumeNum,omitempty"`
-	Volume24hr    float64           `json:"volume24hr,omitempty"`
-	Liquidity     float64           `json:"liquidityNum,omitempty"`
-	BestBid       float64           `json:"bestBid,omitempty"`
-	BestAsk       float64           `json:"bestAsk,omitempty"`
-	Active        bool              `json:"active,omitempty"`
-	Closed        bool              `json:"closed,omitempty"`
-	Events        []MarketEventData `json:"events,omitempty"`
+	ID               string            `json:"id"`
+	Question         string            `json:"question"`
+	Description      string            `json:"description"`
+	ConditionID      string            `json:"conditionId"`
+	Slug             string            `json:"slug"`
+	ResolutionSource string            `json:"resolutionSource,omitempty"`
+	EndDate          time.Time         `json:"endDate"`
+	CLOBTokenIDs     string            `json:"clobTokenIds"`  // JSON 字符串数组
+	Outcomes         string            `json:"outcomes"`      // JSON 字符串数组，例如 ["Yes","No"]
+	OutcomePrices    string            `json:"outcomePrices"` // JSON 字符串数组，例如 ["0.52","0.48"]
+	Volume           float64           `json:"volumeNum,omitempty"`
+	Volume24hr       float64           `json:"volume24hr,omitempty"`
+	Liquidity        float64           `json:"liquidityNum,omitempty"`
+	BestBid          float64           `json:"bestBid,omitempty"`
+	BestAsk          float64           `json:"bestAsk,omitempty"`
+	Active           bool              `json:"active,omitempty"`
+	Closed           bool              `json:"closed,omitempty"`
+	Events           []MarketEventData `json:"events,omitempty"`
 }
 
 // GetCLOBTokenIDs 获取 CLOB Token ID 列表

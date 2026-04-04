@@ -187,7 +187,7 @@ func (w *wsCLOBChannelConn) pingLoop(ctx context.Context) {
 
 // receiveLoop 接收循环
 func (w *wsCLOBChannelConn) receiveLoop(ctx context.Context) {
-	logger := logr.FromContextOrDiscard(ctx).WithName("clob-channel-watcher")
+	logger := logr.FromContextOrDiscard(ctx).WithName("clob-channel-conn")
 
 	logger.V(1).Info("clob channel receive loop started")
 

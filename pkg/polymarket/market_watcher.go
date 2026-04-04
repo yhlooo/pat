@@ -70,15 +70,18 @@ func (w *MarketWatcher) runLoop(ctx context.Context) {
 			continue
 		}
 		w.lock.Lock()
+
 		w.conn = conn
-		w.lock.Unlock()
 
 		// 订阅资产
 		assetIDs := make([]string, 0, len(w.watchAssetIDs))
 		for id := range w.watchAssetIDs {
 			assetIDs = append(assetIDs, id)
 		}
-		if err := w.conn.SendSubscriptionRequest(ctx, &CLOBSubscriptionRequest{
+
+		w.lock.Unlock()
+
+		if err := conn.SendSubscriptionRequest(ctx, &CLOBSubscriptionRequest{
 			AssetIDs:             assetIDs,
 			Type:                 SubTypeMarket,
 			CustomFeatureEnabled: true,
@@ -87,7 +90,7 @@ func (w *MarketWatcher) runLoop(ctx context.Context) {
 			continue
 		}
 
-		for event := range w.conn.Channel() {
+		for event := range conn.Channel() {
 			select {
 			case <-ctx.Done():
 				return
@@ -95,7 +98,7 @@ func (w *MarketWatcher) runLoop(ctx context.Context) {
 			}
 		}
 
-		if err := w.conn.Err(); err != nil {
+		if err := conn.Err(); err != nil {
 			logger.Error(err, "watch market channel error")
 		}
 	}
