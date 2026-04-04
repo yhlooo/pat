@@ -228,6 +228,7 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 			trader.lock.Lock()
 			notResolvedMarkets[newMarket.ConditionID] = newMarket
 			curMarket = newMarket
+			trader.curMarket = curMarket
 			trader.lock.Unlock()
 			status.MarketSlug = newMarket.Slug
 			curAssetIDs, err = curMarket.GetCLOBTokenIDs()
