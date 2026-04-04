@@ -37,10 +37,10 @@ type Status struct {
 
 // MarketPrices 市场价格信息
 type MarketPrices struct {
-	// 结果 1 价格
-	Outcome1 AssetPrices
-	// 结果 2 价格
-	Outcome2 AssetPrices
+	// Yes 价格
+	Yes AssetPrices
+	// No 价格
+	No AssetPrices
 }
 
 // ResolutionSource 判定来源

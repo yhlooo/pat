@@ -82,7 +82,7 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 		curMarket.ConditionID: curMarket,
 	}
 
-	curAssetIDs, err := curMarket.GetCLOBTokenIDs()
+	yesAssetID, noAssetID, err := curMarket.GetCLOBTokenIDs()
 	if err != nil {
 		logger.Error(err, fmt.Sprintf("get sub assets ids for market %q error", curMarket.Slug))
 		return
@@ -91,12 +91,12 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 	status := Status{
 		MarketSlug: curMarket.Slug,
 		Prices: MarketPrices{
-			Outcome1: AssetPrices{
+			Yes: AssetPrices{
 				BestBid: decimal.New(51, -2),
 				BestAsk: decimal.New(50, -2),
 				Last:    decimal.New(50, -2),
 			},
-			Outcome2: AssetPrices{
+			No: AssetPrices{
 				BestBid: decimal.New(50, -2),
 				BestAsk: decimal.New(49, -2),
 				Last:    decimal.New(49, -2),
@@ -109,7 +109,7 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 
 	// 开始监听市场
 	logger.Info(fmt.Sprintf("watching market: %s (%s)", curMarket.Slug, curMarket.ConditionID))
-	marketWatcher := polymarket.NewMarketWatcher(trader.client, curAssetIDs[:])
+	marketWatcher := polymarket.NewMarketWatcher(trader.client, []string{yesAssetID, noAssetID})
 	marketWatcher.Start(ctx)
 	defer func() { _ = marketWatcher.Close() }()
 
@@ -167,12 +167,12 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 				}
 				for _, change := range eventData.PriceChanges {
 					switch change.AssetID {
-					case curAssetIDs[0]:
-						status.Prices.Outcome1.BestAsk = change.BestAsk
-						status.Prices.Outcome1.BestBid = change.BestBid
-					case curAssetIDs[1]:
-						status.Prices.Outcome2.BestAsk = change.BestAsk
-						status.Prices.Outcome2.BestBid = change.BestBid
+					case yesAssetID:
+						status.Prices.Yes.BestAsk = change.BestAsk
+						status.Prices.Yes.BestBid = change.BestBid
+					case noAssetID:
+						status.Prices.No.BestAsk = change.BestAsk
+						status.Prices.No.BestBid = change.BestBid
 					}
 				}
 
@@ -187,10 +187,10 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 					continue
 				}
 				switch eventData.AssetID {
-				case curAssetIDs[0]:
-					status.Prices.Outcome1.Last = eventData.Price
-				case curAssetIDs[1]:
-					status.Prices.Outcome2.Last = eventData.Price
+				case yesAssetID:
+					status.Prices.Yes.Last = eventData.Price
+				case noAssetID:
+					status.Prices.No.Last = eventData.Price
 				}
 
 			case polymarket.EventMarketResolved:
@@ -206,8 +206,8 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 				}
 				// TODO: 结算持仓
 				delete(notResolvedMarkets, market.ConditionID)
-				resolvedAssetIDs, _ := market.GetCLOBTokenIDs()
-				marketWatcher.Unsubscribe(ctx, resolvedAssetIDs[:]...)
+				resolvedYes, resolvedNo, _ := market.GetCLOBTokenIDs()
+				marketWatcher.Unsubscribe(ctx, resolvedYes, resolvedNo)
 
 			default:
 				continue
@@ -231,12 +231,12 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 			trader.curMarket = curMarket
 			trader.lock.Unlock()
 			status.MarketSlug = newMarket.Slug
-			curAssetIDs, err = curMarket.GetCLOBTokenIDs()
+			yesAssetID, noAssetID, err = curMarket.GetCLOBTokenIDs()
 			if err != nil {
 				logger.Error(err, fmt.Sprintf("get sub assets ids for market %q error", curMarket.Slug))
 				return
 			}
-			marketWatcher.Subscribe(ctx, curAssetIDs[:]...)
+			marketWatcher.Subscribe(ctx, yesAssetID, noAssetID)
 		}
 
 		// 发送当前状态

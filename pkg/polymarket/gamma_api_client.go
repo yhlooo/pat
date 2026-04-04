@@ -128,15 +128,23 @@ type Market struct {
 }
 
 // GetCLOBTokenIDs 获取 CLOB Token ID 列表
-func (m Market) GetCLOBTokenIDs() ([2]string, error) {
+func (m Market) GetCLOBTokenIDs() (yes, no string, err error) {
 	var ret [2]string
-	return ret, json.Unmarshal([]byte(m.CLOBTokenIDs), &ret)
+	err = json.Unmarshal([]byte(m.CLOBTokenIDs), &ret)
+	if err != nil {
+		return "", "", err
+	}
+	return ret[0], ret[1], nil
 }
 
 // GetOutcomes 获取结果名列表
-func (m Market) GetOutcomes() ([2]string, error) {
+func (m Market) GetOutcomes() (yes, no string, err error) {
 	var ret [2]string
-	return ret, json.Unmarshal([]byte(m.Outcomes), &ret)
+	err = json.Unmarshal([]byte(m.Outcomes), &ret)
+	if err != nil {
+		return "", "", err
+	}
+	return ret[0], ret[1], nil
 }
 
 // MarketEventData 市场关联的事件信息

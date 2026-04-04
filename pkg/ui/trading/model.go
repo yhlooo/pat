@@ -84,7 +84,7 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View 渲染显示内容
 func (ui *UI) View() string {
-	outcomes, _ := ui.curMarket.GetOutcomes()
+	yes, no, _ := ui.curMarket.GetOutcomes()
 
 	return fmt.Sprintf(`# %s (%s)
 
@@ -109,13 +109,13 @@ Timer: %s
 		ui.lastStatus.ResolutionSource.URL,
 		ui.lastStatus.ResolutionSource.Value,
 		ui.curMarket.EndDate.Sub(time.Now()).Round(time.Second).String(),
-		outcomes[0],
-		ui.lastStatus.Prices.Outcome1.BestBid.StringFixedBank(2),
-		ui.lastStatus.Prices.Outcome1.BestAsk.StringFixedBank(2),
-		ui.lastStatus.Prices.Outcome1.Last.StringFixedBank(2),
-		outcomes[1],
-		ui.lastStatus.Prices.Outcome2.BestBid.StringFixedBank(2),
-		ui.lastStatus.Prices.Outcome2.BestAsk.StringFixedBank(2),
-		ui.lastStatus.Prices.Outcome2.Last.StringFixedBank(2),
+		yes,
+		ui.lastStatus.Prices.Yes.BestBid.StringFixedBank(2),
+		ui.lastStatus.Prices.Yes.BestAsk.StringFixedBank(2),
+		ui.lastStatus.Prices.Yes.Last.StringFixedBank(2),
+		no,
+		ui.lastStatus.Prices.No.BestBid.StringFixedBank(2),
+		ui.lastStatus.Prices.No.BestAsk.StringFixedBank(2),
+		ui.lastStatus.Prices.No.Last.StringFixedBank(2),
 	)
 }
