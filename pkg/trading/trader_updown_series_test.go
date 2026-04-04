@@ -20,8 +20,13 @@ func TestUpdown5m15m(t *testing.T) {
 	a.Equal("btc-updown-15m-1774970100", BTCUpdown15m.ActiveMarketSlugForTime(t1))
 	a.Equal("eth-updown-5m-1774970100", ETHUpdown5m.ActiveMarketSlugForTime(t1))
 
-	t2 := time.Unix(1774970100, 0)
-	a.Equal("btc-updown-5m-1774970100", BTCUpdown5m.ActiveMarketSlugForTime(t2))
-	a.Equal("btc-updown-15m-1774970100", BTCUpdown15m.ActiveMarketSlugForTime(t2))
-	a.Equal("eth-updown-5m-1774970100", ETHUpdown5m.ActiveMarketSlugForTime(t2))
+	t2 := time.Unix(1774970000, 0)
+	a.Equal("btc-updown-5m-1774969800", BTCUpdown5m.ActiveMarketSlugForTime(t2))
+	a.Equal("btc-updown-15m-1774969200", BTCUpdown15m.ActiveMarketSlugForTime(t2))
+	a.Equal("eth-updown-5m-1774969800", ETHUpdown5m.ActiveMarketSlugForTime(t2))
+
+	t3 := time.Unix(1774970100, 0)
+	a.Equal("btc-updown-5m-1774970100", BTCUpdown5m.ActiveMarketSlugForTime(t3))
+	a.Equal("btc-updown-15m-1774970100", BTCUpdown15m.ActiveMarketSlugForTime(t3))
+	a.Equal("eth-updown-5m-1774970100", ETHUpdown5m.ActiveMarketSlugForTime(t3))
 }

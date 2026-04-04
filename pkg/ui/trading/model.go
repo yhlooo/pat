@@ -26,6 +26,7 @@ type UI struct {
 
 var _ tea.Model = (*UI)(nil)
 
+// Run 开始运行
 func (ui *UI) Run(ctx context.Context) error {
 	if err := ui.trader.Start(ctx); err != nil {
 		return fmt.Errorf("start trader error: %w", err)

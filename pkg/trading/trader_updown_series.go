@@ -293,7 +293,7 @@ func (s Updown5m15m) Slug() string {
 
 // ActiveMarketSlugForTime 获取指定时间活跃的市场 slug
 func (s Updown5m15m) ActiveMarketSlugForTime(t time.Time) string {
-	return s.Slug() + "-" + strconv.FormatInt(t.Round(s.Interval).Unix(), 10)
+	return s.Slug() + "-" + strconv.FormatInt(t.Unix()/int64(s.Interval/time.Second)*int64(s.Interval/time.Second), 10)
 }
 
 // ResolutionSourceSymbol 判定来源资产代号
