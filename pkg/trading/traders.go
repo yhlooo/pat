@@ -91,8 +91,9 @@ func (s *Status) FillOrder(id string, price decimal.Decimal, qty decimal.Decimal
 	}
 
 	// 记录成交数量
+	amount := qty.Mul(price).Round(6)
 	order.FilledQuantity = order.FilledQuantity.Add(qty)
-	order.FilledAmount = order.FilledAmount.Add(qty.Mul(price)).Round(6)
+	order.FilledAmount = order.FilledAmount.Add(amount)
 	order.FilledPrice = order.FilledAmount.DivRound(order.FilledQuantity, 6)
 
 	// 更新库存
@@ -112,10 +113,15 @@ func (s *Status) FillOrder(id string, price decimal.Decimal, qty decimal.Decimal
 	if order.Side == Buy {
 		holding.Quantity = holding.Quantity.Add(qty)
 		holding.TradableQuantity = holding.TradableQuantity.Add(qty)
+		s.Cash = s.Cash.Sub(amount)
 	} else {
 		holding.Quantity = holding.Quantity.Sub(qty)
+		s.Cash = s.Cash.Add(amount)
 	}
 	holding.Value = holding.Quantity.Mul(holding.Price).Round(6)
+	if holding.Quantity.IsZero() {
+		delete(s.Holding, order.TokenID)
+	}
 
 	// 更新订单记录
 	if order.FilledQuantity.GreaterThanOrEqual(order.Quantity) {
