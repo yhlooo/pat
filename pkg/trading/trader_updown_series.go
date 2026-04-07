@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
 	"github.com/yhlooo/pat/pkg/polymarket"
@@ -17,12 +18,14 @@ import (
 func NewUpdownSeriesTrader(
 	series UpdownSeries,
 	client polymarket.ClientInterface,
+	strategy Strategy,
 	opts TraderOptions,
 ) *UpdownSeriesTrader {
 	return &UpdownSeriesTrader{
-		opts:   opts,
-		client: client,
-		series: series,
+		opts:     opts,
+		client:   client,
+		series:   series,
+		strategy: strategy,
 	}
 }
 
@@ -32,8 +35,10 @@ type UpdownSeriesTrader struct {
 
 	opts TraderOptions
 
-	client     polymarket.ClientInterface
-	series     UpdownSeries
+	client   polymarket.ClientInterface
+	series   UpdownSeries
+	strategy Strategy
+
 	done       chan struct{}
 	statusChan chan Status
 
@@ -73,23 +78,23 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 	}()
 
 	trader.lock.RLock()
-	curMarket := trader.curMarket
-	trader.lock.RUnlock()
-
-	// 未判定的市场
-	// key 是市场 condition id
-	notResolvedMarkets := map[string]*polymarket.Market{
-		curMarket.ConditionID: curMarket,
-	}
-
-	yesAssetID, noAssetID, err := curMarket.GetCLOBTokenIDs()
+	yesTokenID, noTokenID, err := trader.curMarket.GetCLOBTokenIDs()
 	if err != nil {
-		logger.Error(err, fmt.Sprintf("get sub assets ids for market %q error", curMarket.Slug))
+		logger.Error(err, fmt.Sprintf("get sub assets ids for market %q error", trader.curMarket.Slug))
+		trader.lock.RUnlock()
 		return
 	}
-
+	curMarket := Market{
+		Slug:        trader.curMarket.Slug,
+		ConditionID: trader.curMarket.ConditionID,
+		YesTokenID:  yesTokenID,
+		NoTokenID:   noTokenID,
+	}
 	status := Status{
-		MarketSlug: curMarket.Slug,
+		CurrentMarket: curMarket,
+		WatchingMarkets: map[string]Market{
+			curMarket.ConditionID: curMarket,
+		},
 		Prices: MarketPrices{
 			Yes: AssetPrices{
 				BestBid: decimal.New(51, -2),
@@ -103,20 +108,24 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 			},
 		},
 		ResolutionSource: ResolutionSource{
-			URL: curMarket.ResolutionSource,
+			URL: trader.curMarket.ResolutionSource,
 		},
 	}
+	trader.lock.RUnlock()
 
 	// 开始监听市场
-	logger.Info(fmt.Sprintf("watching market: %s (%s)", curMarket.Slug, curMarket.ConditionID))
-	marketWatcher := polymarket.NewMarketWatcher(trader.client, []string{yesAssetID, noAssetID})
+	logger.Info(fmt.Sprintf("watching market: %s (%s)", status.CurrentMarket.Slug, status.CurrentMarket.ConditionID))
+	marketWatcher := polymarket.NewMarketWatcher(
+		trader.client,
+		[]string{status.CurrentMarket.YesTokenID, status.CurrentMarket.NoTokenID},
+	)
 	marketWatcher.Start(ctx)
 	defer func() { _ = marketWatcher.Close() }()
 
 	// 开始监听 rtds
 	var rtdsWatcherChan <-chan *polymarket.RTDSEvent
-	resolutionSourceSymbol := trader.series.ResolutionSourceSymbol()
-	if resolutionSourceSymbol != "" {
+	status.ResolutionSource.Symbol = trader.series.ResolutionSourceSymbol()
+	if status.ResolutionSource.Symbol != "" {
 		rtdsWatcher := polymarket.NewRTDSWatcher(trader.client, []polymarket.RTDSSubscription{
 			trader.series.ResolutionSourceSubscription(),
 		})
@@ -137,14 +146,10 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 				return
 			}
 
-			if event.Payload.Symbol != resolutionSourceSymbol {
-				logger.V(1).Info(fmt.Sprintf(
-					"ignore unknown symbol price change, symbol: %s",
-					event.Payload.Symbol,
-				))
+			// 处理 RTDS 事件
+			if ok := trader.handleRTDSEvent(ctx, &status, event); !ok {
 				continue
 			}
-			status.ResolutionSource.Value = decimal.NewFromFloat(event.Payload.Value)
 
 		case event, ok := <-marketWatcher.Channel():
 			if !ok {
@@ -154,95 +159,311 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 			}
 
 			// 处理市场事件
-			switch event.EventType {
-			case polymarket.EventPriceChange:
-				// 下单/取消导致出价或要价变化
-				eventData := event.PriceChange
-				if eventData.Market != curMarket.ConditionID {
-					logger.V(1).Info(fmt.Sprintf(
-						"ignore not current market price change, market: %s",
-						eventData.Market,
-					))
-					continue
-				}
-				for _, change := range eventData.PriceChanges {
-					switch change.AssetID {
-					case yesAssetID:
-						status.Prices.Yes.BestAsk = change.BestAsk
-						status.Prices.Yes.BestBid = change.BestBid
-					case noAssetID:
-						status.Prices.No.BestAsk = change.BestAsk
-						status.Prices.No.BestBid = change.BestBid
-					}
-				}
-
-			case polymarket.EventLastTradePrice:
-				// 成交导致最近成交价变化
-				eventData := event.LastTradePrice
-				if eventData.Market != curMarket.ConditionID {
-					logger.V(1).Info(fmt.Sprintf(
-						"ignore not current market last trade price, market: %s",
-						eventData.Market,
-					))
-					continue
-				}
-				switch eventData.AssetID {
-				case yesAssetID:
-					status.Prices.Yes.Last = eventData.Price
-				case noAssetID:
-					status.Prices.No.Last = eventData.Price
-				}
-
-			case polymarket.EventMarketResolved:
-				// 市场判定
-				eventData := event.MarketResolved
-				market, ok := notResolvedMarkets[eventData.Market]
-				if !ok {
-					logger.V(1).Info(fmt.Sprintf(
-						"ignore not watching market resolved, market: %s",
-						eventData.Market,
-					))
-					continue
-				}
-				// TODO: 结算持仓
-				delete(notResolvedMarkets, market.ConditionID)
-				resolvedYes, resolvedNo, _ := market.GetCLOBTokenIDs()
-				marketWatcher.Unsubscribe(ctx, resolvedYes, resolvedNo)
-
-			default:
+			if ok := trader.handleMarketChannelEvent(ctx, &status, marketWatcher, event); !ok {
 				continue
 			}
 
 		case <-ticker.C:
-			// 检查是否需要订阅新市场
-			newMarketSlug := trader.series.ActiveMarketSlugForTime(time.Now())
-			if newMarketSlug == curMarket.Slug {
-				continue
-			}
-			newMarket, err := trader.client.GetMarketBySlug(ctx, newMarketSlug)
-			if err != nil {
-				logger.Error(err, fmt.Sprintf("get market %q error", newMarketSlug))
-				continue
-			}
+			trader.handleTicketEvent(ctx, &status, marketWatcher)
+		}
 
-			trader.lock.Lock()
-			notResolvedMarkets[newMarket.ConditionID] = newMarket
-			curMarket = newMarket
-			trader.curMarket = curMarket
-			trader.lock.Unlock()
-			status.MarketSlug = newMarket.Slug
-			yesAssetID, noAssetID, err = curMarket.GetCLOBTokenIDs()
-			if err != nil {
-				logger.Error(err, fmt.Sprintf("get sub assets ids for market %q error", curMarket.Slug))
-				return
-			}
-			marketWatcher.Subscribe(ctx, yesAssetID, noAssetID)
+		// 模拟撮合订单
+		if trader.opts.DryRun {
+			trader.simulateMatchingOrders(ctx, &status)
+		}
+
+		// 执行策略
+		actions, err := trader.strategy.Execute(ctx, status)
+		if err != nil {
+			logger.Error(err, "execute strategy error")
+		}
+		// 按照策略执行结果行动
+		trader.handleActions(ctx, &status, actions)
+
+		// 再尝试模拟撮合新订单
+		if trader.opts.DryRun {
+			trader.simulateMatchingOrders(ctx, &status)
 		}
 
 		// 发送当前状态
 		select {
 		case trader.statusChan <- status:
 		default:
+		}
+	}
+}
+
+// handleRTDSEvent 处理 RTDS 事件
+func (trader *UpdownSeriesTrader) handleRTDSEvent(
+	ctx context.Context,
+	status *Status,
+	event *polymarket.RTDSEvent,
+) bool {
+	logger := logr.FromContextOrDiscard(ctx)
+	if event.Payload.Symbol != status.ResolutionSource.Symbol {
+		logger.V(1).Info(fmt.Sprintf(
+			"ignore unknown symbol price change, symbol: %s",
+			event.Payload.Symbol,
+		))
+		return false
+	}
+	status.ResolutionSource.Value = decimal.NewFromFloat(event.Payload.Value)
+	return true
+}
+
+// handleMarketChannelEvent 处理市场事件
+func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
+	ctx context.Context,
+	status *Status,
+	watcher *polymarket.MarketWatcher,
+	event *polymarket.CLOBEvent,
+) bool {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	// 处理市场事件
+	switch event.EventType {
+	case polymarket.EventPriceChange:
+		// 下单/取消导致出价或要价变化
+		eventData := event.PriceChange
+		if eventData.Market != status.CurrentMarket.ConditionID {
+			logger.V(1).Info(fmt.Sprintf(
+				"ignore not current market price change, market: %s",
+				eventData.Market,
+			))
+			return false
+		}
+		for _, change := range eventData.PriceChanges {
+			switch change.AssetID {
+			case status.CurrentMarket.YesTokenID:
+				status.Prices.Yes.BestAsk = change.BestAsk
+				status.Prices.Yes.BestBid = change.BestBid
+			case status.CurrentMarket.NoTokenID:
+				status.Prices.No.BestAsk = change.BestAsk
+				status.Prices.No.BestBid = change.BestBid
+			}
+		}
+
+	case polymarket.EventLastTradePrice:
+		// 成交导致最近成交价变化
+		eventData := event.LastTradePrice
+		if eventData.Market != status.CurrentMarket.ConditionID {
+			logger.V(1).Info(fmt.Sprintf(
+				"ignore not current market last trade price, market: %s",
+				eventData.Market,
+			))
+			return false
+		}
+		switch eventData.AssetID {
+		case status.CurrentMarket.YesTokenID:
+			status.Prices.Yes.Last = eventData.Price
+		case status.CurrentMarket.NoTokenID:
+			status.Prices.No.Last = eventData.Price
+		}
+
+	case polymarket.EventMarketResolved:
+		// 市场判定
+		eventData := event.MarketResolved
+		market, ok := status.WatchingMarkets[eventData.Market]
+		if !ok {
+			logger.V(1).Info(fmt.Sprintf(
+				"ignore not watching market resolved, market: %s",
+				eventData.Market,
+			))
+			return false
+		}
+		// TODO: 结算持仓
+		delete(status.WatchingMarkets, market.ConditionID)
+		watcher.Unsubscribe(ctx, market.YesTokenID, market.NoTokenID)
+
+	default:
+		return false
+	}
+
+	return true
+
+}
+
+// handleTicketEvent 处理时钟事件
+func (trader *UpdownSeriesTrader) handleTicketEvent(
+	ctx context.Context,
+	status *Status,
+	watcher *polymarket.MarketWatcher,
+) {
+	// 轮转市场
+	trader.rotateMarket(ctx, status, watcher)
+}
+
+// rotateMarket 轮转市场
+func (trader *UpdownSeriesTrader) rotateMarket(
+	ctx context.Context,
+	status *Status,
+	watcher *polymarket.MarketWatcher,
+) bool {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	newMarketSlug := trader.series.ActiveMarketSlugForTime(time.Now())
+	if newMarketSlug == status.CurrentMarket.Slug {
+		return false
+	}
+
+	newMarket, err := trader.client.GetMarketBySlug(ctx, newMarketSlug)
+	if err != nil {
+		logger.Error(err, fmt.Sprintf("get market %q error", newMarketSlug))
+		return false
+	}
+
+	yesTokenID, noTokenID, err := newMarket.GetCLOBTokenIDs()
+	if err != nil {
+		logger.Error(err, fmt.Sprintf("get sub assets ids for market %q error", newMarket.Slug))
+		return false
+	}
+
+	m := Market{
+		Slug:        newMarket.Slug,
+		ConditionID: newMarket.ConditionID,
+		YesTokenID:  yesTokenID,
+		NoTokenID:   noTokenID,
+	}
+
+	trader.lock.Lock()
+	status.CurrentMarket = m
+	status.WatchingMarkets[newMarket.ConditionID] = m
+	trader.curMarket = newMarket
+	trader.lock.Unlock()
+	watcher.Subscribe(ctx, yesTokenID, noTokenID)
+
+	return true
+}
+
+// handleActions 处理行动
+func (trader *UpdownSeriesTrader) handleActions(ctx context.Context, status *Status, actions []Action) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	for _, action := range actions {
+		if !trader.opts.DryRun {
+			// TODO: 非 dry run 模式需要真实调用 PolyMarket 创建或取消订单，再记录结果
+		}
+
+		switch {
+		case action.CreateOrder != nil:
+			// 创建订单
+			if status.PendingOrders == nil {
+				status.PendingOrders = make(map[string]Order)
+			}
+			orderID := uuid.New().String() // TODO: 非 dry run 模式下应根据 PolyMarket 返回结果获取订单 ID
+			tokenID := status.CurrentMarket.YesTokenID
+			if action.CreateOrder.TokenType == No {
+				tokenID = status.CurrentMarket.NoTokenID
+			}
+			o := Order{
+				ID:         orderID,
+				TokenType:  action.CreateOrder.TokenType,
+				TokenID:    tokenID,
+				MarketID:   status.CurrentMarket.ConditionID,
+				MarketSlug: status.CurrentMarket.Slug,
+				Side:       action.CreateOrder.Side,
+				Type:       action.CreateOrder.Type,
+				Price:      action.CreateOrder.Price,
+				Quantity:   action.CreateOrder.Quantity,
+				Amount:     action.CreateOrder.Amount,
+				Expiration: action.CreateOrder.Expiration,
+				CreatedAt:  time.Now(),
+				State:      OrderPending,
+			}
+
+			if o.Side == Sell {
+				// 扣库存
+				holding, ok := status.Holding[o.TokenID]
+				if !ok {
+					logger.Info(fmt.Sprintf("WARN there are no %q for trading", o.TokenID))
+					continue
+				}
+				if holding.TradableQuantity.LessThan(o.Quantity) {
+					logger.Info(fmt.Sprintf("WARN there are not enough %q available for trading", o.TokenID))
+					continue
+				}
+				holding.TradableQuantity = holding.TradableQuantity.Sub(o.Quantity)
+			}
+			status.PendingOrders[orderID] = o
+
+		case action.CancelOrder != nil:
+			// 取消订单
+			if ok := status.CancelOrder(action.CancelOrder.ID, OrderCancelled); !ok {
+				logger.Info(fmt.Sprintf("WARN order %q not found, can not be cancelled", action.CancelOrder.ID))
+			}
+		}
+	}
+}
+
+// simulateMatchingOrders 模拟撮合订单
+//
+// 不考虑对手方订单量，仅看最近成交价、最佳出价、最佳要价是否满足订单
+func (trader *UpdownSeriesTrader) simulateMatchingOrders(ctx context.Context, status *Status) {
+	logger := logr.FromContextOrDiscard(ctx)
+
+	now := time.Now()
+
+	for id, order := range status.PendingOrders {
+		// 取消非当前市场订单
+		if order.MarketSlug != status.CurrentMarket.Slug {
+			if ok := status.CancelOrder(id, OrderCancelled); !ok {
+				logger.Info(fmt.Sprintf("WARN order %q not found, can not be cancelled", id))
+			}
+			continue
+		}
+
+		// 取消到期的 GTD 订单
+		if order.Type == GTD && order.Expiration.Before(now) {
+			if ok := status.CancelOrder(id, OrderCancelled); !ok {
+				logger.Info(fmt.Sprintf("WARN order %q not found, can not be cancelled", id))
+			}
+			continue
+		}
+
+		curPrices := status.Prices.Yes
+		if order.TokenType == No {
+			curPrices = status.Prices.No
+		}
+
+		switch order.Type {
+		case FOK, FAK:
+			// 取消不满足条件的市价单
+			if (order.Side == Buy && order.Price.LessThan(curPrices.BestAsk)) ||
+				(order.Side == Sell && order.Price.GreaterThan(curPrices.BestBid)) {
+				if ok := status.CancelOrder(id, OrderFailed); !ok {
+					logger.Info(fmt.Sprintf("WARN order %q not found, can not be cancelled", id))
+				}
+				continue
+			}
+
+			// 剩余的直接以最佳出价/要价成交
+			filledPrice := curPrices.BestAsk
+			if order.Side == Sell {
+				filledPrice = curPrices.BestBid
+			}
+			status.FillOrder(id, filledPrice, order.Quantity.Sub(order.FilledQuantity))
+
+		case GTC, GTD:
+			filledPrice := curPrices.Last
+
+			switch order.Side {
+			case Buy:
+				if curPrices.BestAsk.LessThan(filledPrice) {
+					filledPrice = curPrices.BestAsk
+				}
+				if order.Price.GreaterThanOrEqual(filledPrice) {
+					// 成交
+					status.FillOrder(id, filledPrice, order.Quantity.Sub(order.FilledQuantity))
+				}
+			case Sell:
+				if curPrices.BestBid.GreaterThan(filledPrice) {
+					filledPrice = curPrices.BestBid
+				}
+				if order.Price.LessThanOrEqual(filledPrice) {
+					// 成交
+					status.FillOrder(id, filledPrice, order.Quantity.Sub(order.FilledQuantity))
+				}
+			}
 		}
 	}
 }

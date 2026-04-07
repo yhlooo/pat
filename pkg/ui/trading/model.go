@@ -73,7 +73,7 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	case trading.Status:
 		ui.lastStatus = typed
-		if typed.MarketSlug != ui.curMarket.Slug {
+		if typed.CurrentMarket.Slug != ui.curMarket.Slug {
 			ui.curMarket = ui.trader.Market()
 		}
 		return ui, ui.receiveNextTradingStatus

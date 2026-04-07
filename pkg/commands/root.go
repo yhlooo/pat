@@ -176,6 +176,7 @@ func NewCommand(name string) *cobra.Command {
 			trader := trading.NewUpdownSeriesTrader(
 				series,
 				polymarket.NewClient(polymarket.AuthInfo{}),
+				trading.DiscardStrategy,
 				trading.TraderOptions{DryRun: opts.DryRun},
 			)
 			ui := tradingui.NewUI(trader)
