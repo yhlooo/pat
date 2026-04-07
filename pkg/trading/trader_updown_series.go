@@ -218,69 +218,82 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 	watcher *polymarket.MarketWatcher,
 	event *polymarket.CLOBEvent,
 ) bool {
-	logger := logr.FromContextOrDiscard(ctx)
+	changed := false
 
 	// 处理市场事件
 	switch event.EventType {
 	case polymarket.EventPriceChange:
 		// 下单/取消导致出价或要价变化
 		eventData := event.PriceChange
-		if eventData.Market != status.CurrentMarket.ConditionID {
-			logger.V(1).Info(fmt.Sprintf(
-				"ignore not current market price change, market: %s",
-				eventData.Market,
-			))
-			return false
-		}
-		for _, change := range eventData.PriceChanges {
-			switch change.AssetID {
-			case status.CurrentMarket.YesTokenID:
-				status.Prices.Yes.BestAsk = change.BestAsk
-				status.Prices.Yes.BestBid = change.BestBid
-			case status.CurrentMarket.NoTokenID:
-				status.Prices.No.BestAsk = change.BestAsk
-				status.Prices.No.BestBid = change.BestBid
+		if eventData.Market == status.CurrentMarket.ConditionID {
+			for _, change := range eventData.PriceChanges {
+				switch change.AssetID {
+				case status.CurrentMarket.YesTokenID:
+					status.Prices.Yes.BestAsk = change.BestAsk
+					status.Prices.Yes.BestBid = change.BestBid
+				case status.CurrentMarket.NoTokenID:
+					status.Prices.No.BestAsk = change.BestAsk
+					status.Prices.No.BestBid = change.BestBid
+				}
 			}
+			changed = true
 		}
 
 	case polymarket.EventLastTradePrice:
 		// 成交导致最近成交价变化
 		eventData := event.LastTradePrice
-		if eventData.Market != status.CurrentMarket.ConditionID {
-			logger.V(1).Info(fmt.Sprintf(
-				"ignore not current market last trade price, market: %s",
-				eventData.Market,
-			))
-			return false
+
+		// 更新当前市场价格
+		if eventData.Market == status.CurrentMarket.ConditionID {
+			switch eventData.AssetID {
+			case status.CurrentMarket.YesTokenID:
+				status.Prices.Yes.Last = eventData.Price
+			case status.CurrentMarket.NoTokenID:
+				status.Prices.No.Last = eventData.Price
+			}
+			changed = true
 		}
-		switch eventData.AssetID {
-		case status.CurrentMarket.YesTokenID:
-			status.Prices.Yes.Last = eventData.Price
-		case status.CurrentMarket.NoTokenID:
-			status.Prices.No.Last = eventData.Price
+
+		// 更新持仓价值
+		if holding := status.Holding[eventData.AssetID]; holding != nil {
+			holding.Price = eventData.Price
+			holding.Value = holding.Quantity.Mul(holding.Price).Round(6)
+			changed = true
 		}
 
 	case polymarket.EventMarketResolved:
 		// 市场判定
 		eventData := event.MarketResolved
+
+		// 更新订阅
 		market, ok := status.WatchingMarkets[eventData.Market]
-		if !ok {
-			logger.V(1).Info(fmt.Sprintf(
-				"ignore not watching market resolved, market: %s",
-				eventData.Market,
-			))
-			return false
+		if ok {
+			delete(status.WatchingMarkets, market.ConditionID)
+			watcher.Unsubscribe(ctx, market.YesTokenID, market.NoTokenID)
+			changed = true
 		}
-		// TODO: 结算持仓
-		delete(status.WatchingMarkets, market.ConditionID)
-		watcher.Unsubscribe(ctx, market.YesTokenID, market.NoTokenID)
+
+		// 结算持仓
+		winningAssetID := eventData.WinningAssetId
+		for _, assetID := range eventData.AssetIDs {
+			if assetID != winningAssetID {
+				if holding := status.Holding[assetID]; holding != nil {
+					changed = true
+					delete(status.Holding, assetID)
+				}
+			}
+		}
+		if holding := status.Holding[winningAssetID]; holding != nil {
+			changed = true
+			delete(status.Holding, winningAssetID)
+			status.Cash = status.Cash.Add(holding.Quantity)
+		}
 
 	default:
 		return false
 	}
 
-	return true
-
+	return changed
 }
 
 // handleTicketEvent 处理时钟事件
