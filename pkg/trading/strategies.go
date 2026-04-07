@@ -10,7 +10,7 @@ import (
 // Strategy 策略
 type Strategy interface {
 	// Execute 执行策略
-	Execute(ctx context.Context, statue Status) ([]Action, error)
+	Execute(ctx context.Context, status Status) ([]Action, error)
 }
 
 // Action 操作

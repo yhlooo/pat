@@ -3,6 +3,7 @@ package trading
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -86,6 +87,59 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (ui *UI) View() string {
 	yes, no, _ := ui.curMarket.GetOutcomes()
 
+	holding := ""
+	for _, a := range ui.lastStatus.GetHoldingList() {
+		holding += fmt.Sprintf(
+			"  - %s %s %s worth %s USD\n",
+			a.MarketSlug, a.Type, a.Quantity.Round(2).String(), a.Value.Round(4).String(),
+		)
+	}
+
+	pendingOrderList := ui.lastStatus.GetPendingOrderList()
+	slices.Reverse(pendingOrderList)
+	pendingOrders := ""
+	for _, order := range pendingOrderList {
+		qty := order.Quantity.Round(2).String()
+		if (order.Type == trading.FAK || order.Type == trading.FOK) && order.Side == trading.Buy {
+			qty = order.Amount.Round(2).String() + " USD"
+		}
+		price := "Bid " + order.Price.Round(2).String()
+		if order.Side == trading.Sell {
+			price = "Ask " + order.Price.Round(2).String()
+		}
+		if order.Type == trading.FAK || order.Type == trading.FOK {
+			price = ""
+		}
+		pendingOrders += fmt.Sprintf(
+			"  - %s %s %s %s %s %s %s\n",
+			order.CreatedAt.Format(time.TimeOnly), order.Type, order.Side, qty, order.TokenType, order.MarketSlug, price,
+		)
+	}
+
+	completedOrderList := ui.lastStatus.GetCompletedOrderList()
+	slices.Reverse(completedOrderList)
+	if len(completedOrderList) > 10 {
+		completedOrderList = completedOrderList[:10]
+	}
+	completedOrders := ""
+	for _, order := range completedOrderList {
+		switch order.State {
+		case trading.OrderFilled:
+			completedOrders += fmt.Sprintf(
+				"  - %s %s %s %s filled %s at %s USD (avg price: %s)\n",
+				order.ResolvedAt.Format(time.TimeOnly), order.Side, order.MarketSlug, order.TokenType,
+				order.FilledQuantity.Round(2).String(),
+				order.FilledAmount.Round(2).String(),
+				order.FilledPrice.Round(2).String(),
+			)
+		case trading.OrderFailed, trading.OrderCancelled:
+			completedOrders += fmt.Sprintf(
+				"  - %s %s %s %s %s\n",
+				order.ResolvedAt.Format(time.TimeOnly), order.Side, order.MarketSlug, order.TokenType, order.State,
+			)
+		}
+	}
+
 	return fmt.Sprintf(`# %s (%s)
 
 %s
@@ -103,6 +157,18 @@ Timer: %s
   - best bid: %s 
   - best ask: %s
   - last: %s
+
+## Assets
+
+- Cash: %s
+- Holding:
+%s
+## Orders
+
+- Pending:
+%s
+- Completed:
+%s
 `,
 		ui.curMarket.Question, ui.curMarket.Slug,
 		ui.curMarket.Description,
@@ -117,5 +183,9 @@ Timer: %s
 		ui.lastStatus.Prices.No.BestBid.StringFixedBank(2),
 		ui.lastStatus.Prices.No.BestAsk.StringFixedBank(2),
 		ui.lastStatus.Prices.No.Last.StringFixedBank(2),
+		ui.lastStatus.Cash.StringFixedBank(2),
+		holding,
+		pendingOrders,
+		completedOrders,
 	)
 }

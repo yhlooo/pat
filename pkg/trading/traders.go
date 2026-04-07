@@ -2,6 +2,7 @@ package trading
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -49,6 +50,51 @@ type Status struct {
 	Holding map[string]*Asset `json:"holding,omitempty"`
 }
 
+// GetPendingOrderList 获取等待订单列表
+func (s *Status) GetPendingOrderList() []Order {
+	if len(s.PendingOrders) == 0 {
+		return nil
+	}
+	ret := make([]Order, 0, len(s.PendingOrders))
+	for _, o := range s.PendingOrders {
+		ret = append(ret, o)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return ret[i].CreatedAt.Before(ret[j].CreatedAt)
+	})
+	return ret
+}
+
+// GetCompletedOrderList 获取完成订单列表
+func (s *Status) GetCompletedOrderList() []Order {
+	if len(s.CompletedOrders) == 0 {
+		return nil
+	}
+	ret := make([]Order, 0, len(s.CompletedOrders))
+	for _, o := range s.CompletedOrders {
+		ret = append(ret, o)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return ret[i].ResolvedAt.Before(ret[j].ResolvedAt)
+	})
+	return ret
+}
+
+// GetHoldingList 获取持仓列表
+func (s *Status) GetHoldingList() []*Asset {
+	if len(s.Holding) == 0 {
+		return nil
+	}
+	ret := make([]*Asset, 0, len(s.Holding))
+	for _, a := range s.Holding {
+		ret = append(ret, a)
+	}
+	sort.Slice(ret, func(i, j int) bool {
+		return ret[i].Value.GreaterThan(ret[j].Value)
+	})
+	return ret
+}
+
 // CancelOrder 记录取消订单
 func (s *Status) CancelOrder(id string, state OrderState) bool {
 	order, ok := s.PendingOrders[id]
@@ -86,8 +132,11 @@ func (s *Status) FillOrder(id string, price decimal.Decimal, qty decimal.Decimal
 	}
 
 	// 数量超过订单未成交数量
-	if qty.GreaterThan(order.Quantity.Sub(order.FilledQuantity)) {
+	if !order.Quantity.IsZero() && qty.GreaterThan(order.Quantity.Sub(order.FilledQuantity)) {
 		qty = order.Quantity.Sub(order.FilledQuantity)
+	}
+	if qty.IsZero() {
+		return false
 	}
 
 	// 记录成交数量

@@ -22,6 +22,7 @@ import (
 	"github.com/yhlooo/pat/pkg/i18n"
 	"github.com/yhlooo/pat/pkg/polymarket"
 	"github.com/yhlooo/pat/pkg/trading"
+	"github.com/yhlooo/pat/pkg/trading/strategies"
 	tradingui "github.com/yhlooo/pat/pkg/ui/trading"
 	"github.com/yhlooo/pat/pkg/version"
 )
@@ -64,13 +65,17 @@ func (o *GlobalOptions) AddPFlags(fs *pflag.FlagSet) {
 // NewOptions 创建默认 Options
 func NewOptions() Options {
 	return Options{
-		DryRun: false,
+		DryRun:   true,
+		Scale:    1,
+		Strategy: "discard",
 	}
 }
 
 // Options 运行选项
 type Options struct {
-	DryRun bool
+	DryRun   bool
+	Scale    int
+	Strategy string
 }
 
 // AddPFlags 将选项绑定到命令行参数
@@ -79,6 +84,8 @@ func (o *Options) AddPFlags(fs *pflag.FlagSet) {
 		&o.DryRun, "dry-run", o.DryRun,
 		"The simulation runs and outputs the profit/loss results, but no actual transactions are made",
 	)
+	fs.IntVar(&o.Scale, "scale", o.Scale, "Transaction volume scaling factor")
+	fs.StringVarP(&o.Strategy, "strategy", "s", o.Strategy, "Trading Strategy (one of 'discard', 'monkey')")
 }
 
 // exampleTpl 运行示例说明模版
@@ -173,11 +180,25 @@ func NewCommand(name string) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("series %q not found", args[0])
 			}
+
+			var strategy trading.Strategy
+			switch opts.Strategy {
+			case "discard":
+				strategy = trading.DiscardStrategy
+			case "monkey":
+				strategy = strategies.NewMonkey()
+			default:
+				return fmt.Errorf("unknown strategy %q", opts.Strategy)
+			}
+
 			trader := trading.NewUpdownSeriesTrader(
 				series,
 				polymarket.NewClient(polymarket.AuthInfo{}),
-				trading.DiscardStrategy,
-				trading.TraderOptions{DryRun: opts.DryRun},
+				strategy,
+				trading.TraderOptions{
+					DryRun: opts.DryRun,
+					Scale:  opts.Scale,
+				},
 			)
 			ui := tradingui.NewUI(trader)
 			return ui.Run(cmd.Context())

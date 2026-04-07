@@ -454,7 +454,10 @@ func (trader *UpdownSeriesTrader) simulateMatchingOrders(ctx context.Context, st
 			if order.Side == Sell {
 				filledPrice = curPrices.BestBid
 			}
-			status.FillOrder(id, filledPrice, order.Quantity.Sub(order.FilledQuantity))
+			if filledPrice.IsZero() {
+				continue
+			}
+			status.FillOrder(id, filledPrice, order.Amount.DivRound(filledPrice, 6))
 
 		case GTC, GTD:
 			filledPrice := curPrices.Last
