@@ -30,15 +30,19 @@ type Monkey struct {
 var _ trading.Strategy = (*Monkey)(nil)
 
 // Execute 执行策略
-func (m *Monkey) Execute(_ context.Context, status trading.Status) ([]trading.Action, error) {
+func (m *Monkey) Execute(_ context.Context, status trading.Status) ([]trading.Action, map[string]interface{}, error) {
 	if time.Since(m.lastTrade) < m.interval {
-		return nil, nil
+		return nil, nil, nil
 	}
 	m.lastTrade = time.Now()
 
 	cancelWeight := len(status.PendingOrders)
 	sellWeight := len(status.Holding)
 	choice := m.rand.IntN(2 + cancelWeight + sellWeight)
+
+	meta := map[string]interface{}{
+		"Choice": choice,
+	}
 
 	// 市价买入 $1 Yes
 	if choice == 0 {
@@ -48,7 +52,7 @@ func (m *Monkey) Execute(_ context.Context, status trading.Status) ([]trading.Ac
 			Type:      trading.FOK,
 			Price:     decimal.NewFromFloat(0.99),
 			Amount:    decimal.NewFromFloat(1),
-		}}}, nil
+		}}}, meta, nil
 	}
 	// 市价买入 $1 No
 	if choice == 1 {
@@ -58,13 +62,13 @@ func (m *Monkey) Execute(_ context.Context, status trading.Status) ([]trading.Ac
 			Type:      trading.FOK,
 			Price:     decimal.NewFromFloat(0.99),
 			Amount:    decimal.NewFromFloat(1),
-		}}}, nil
+		}}}, meta, nil
 	}
 	// 取消订单 * n
 	if choice < 2+cancelWeight {
 		return []trading.Action{{CancelOrder: &trading.CancelOrder{
 			ID: status.GetPendingOrderList()[choice-2].ID,
-		}}}, nil
+		}}}, meta, nil
 	}
 	// 卖出持仓 * n
 	holding := status.GetHoldingList()[choice-2-cancelWeight]
@@ -74,5 +78,5 @@ func (m *Monkey) Execute(_ context.Context, status trading.Status) ([]trading.Ac
 		Type:      trading.FOK,
 		Price:     decimal.NewFromFloat(0.01),
 		Quantity:  holding.TradableQuantity,
-	}}}, nil
+	}}}, meta, nil
 }

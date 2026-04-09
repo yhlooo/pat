@@ -97,14 +97,14 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 		},
 		Prices: MarketPrices{
 			Yes: AssetPrices{
-				BestBid: decimal.New(51, -2),
-				BestAsk: decimal.New(50, -2),
-				Last:    decimal.New(50, -2),
+				BestBid: decimal.New(0, -2),
+				BestAsk: decimal.New(0, -2),
+				Last:    decimal.New(0, -2),
 			},
 			No: AssetPrices{
-				BestBid: decimal.New(50, -2),
-				BestAsk: decimal.New(49, -2),
-				Last:    decimal.New(49, -2),
+				BestBid: decimal.New(0, -2),
+				BestAsk: decimal.New(0, -2),
+				Last:    decimal.New(0, -2),
 			},
 		},
 		ResolutionSource: ResolutionSource{
@@ -173,9 +173,20 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 		}
 
 		// 执行策略
-		actions, err := trader.strategy.Execute(ctx, status)
+		actions, meta, err := trader.strategy.Execute(ctx, status)
 		if err != nil {
 			logger.Error(err, "execute strategy error")
+		}
+		// 记录元数据
+		if len(meta) > 0 && status.Meta == nil {
+			status.Meta = map[string]interface{}{}
+		}
+		for k, v := range meta {
+			if v == nil {
+				delete(status.Meta, k)
+				continue
+			}
+			status.Meta[k] = v
 		}
 		// 按照策略执行结果行动
 		trader.handleActions(ctx, &status, actions)
@@ -344,6 +355,9 @@ func (trader *UpdownSeriesTrader) rotateMarket(
 	trader.curMarket = newMarket
 	trader.lock.Unlock()
 	watcher.Subscribe(ctx, yesTokenID, noTokenID)
+
+	// 记录当前跟踪资产价格
+	status.ResolutionSource.TargetValue = status.ResolutionSource.Value
 
 	return true
 }

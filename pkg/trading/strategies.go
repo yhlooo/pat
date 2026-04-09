@@ -10,7 +10,9 @@ import (
 // Strategy 策略
 type Strategy interface {
 	// Execute 执行策略
-	Execute(ctx context.Context, status Status) ([]Action, error)
+	//
+	// 根据当前状态决策需要采取什么行动，返回行动列表，额外元数据和错误信息
+	Execute(ctx context.Context, status Status) ([]Action, map[string]interface{}, error)
 }
 
 // Action 操作
@@ -51,6 +53,6 @@ var DiscardStrategy = Strategy(discardStrategy{})
 type discardStrategy struct{}
 
 // Execute 执行策略
-func (discardStrategy) Execute(_ context.Context, _ Status) ([]Action, error) {
-	return nil, nil
+func (discardStrategy) Execute(_ context.Context, _ Status) ([]Action, map[string]interface{}, error) {
+	return nil, nil, nil
 }

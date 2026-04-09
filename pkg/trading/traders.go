@@ -32,6 +32,8 @@ type Trader interface {
 
 // Status 交易状态
 type Status struct {
+	// 其它元信息
+	Meta map[string]interface{} `json:"meta,omitempty"`
 	// 当前正在交易的市场基础信息
 	CurrentMarket Market `json:"currentMarket"`
 	// 还未结算的还在监听的市场（键为市场 ConditionID ）
@@ -212,9 +214,10 @@ type MarketPrices struct {
 
 // ResolutionSource 判定来源
 type ResolutionSource struct {
-	URL    string          `json:"url"`
-	Value  decimal.Decimal `json:"value"`
-	Symbol string          `json:"symbol,omitempty"`
+	URL         string          `json:"url"`
+	Value       decimal.Decimal `json:"value"`
+	TargetValue decimal.Decimal `json:"targetValue,omitempty"`
+	Symbol      string          `json:"symbol,omitempty"`
 }
 
 // AssetPrices 资产价格信息

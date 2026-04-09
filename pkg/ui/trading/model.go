@@ -85,6 +85,11 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View 渲染显示内容
 func (ui *UI) View() string {
+	meta := ""
+	for k, v := range ui.lastStatus.Meta {
+		meta += fmt.Sprintf("  %s: %v\n", k, v)
+	}
+
 	yes, no, _ := ui.curMarket.GetOutcomes()
 
 	holding := ""
@@ -146,6 +151,9 @@ func (ui *UI) View() string {
 
 Resolution Source: %s
 - Value: %s
+- Target Value: %s
+Meta:
+%s
 
 Timer: %s
 
@@ -174,6 +182,8 @@ Timer: %s
 		ui.curMarket.Description,
 		ui.lastStatus.ResolutionSource.URL,
 		ui.lastStatus.ResolutionSource.Value,
+		ui.lastStatus.ResolutionSource.TargetValue,
+		meta,
 		ui.curMarket.EndDate.Sub(time.Now()).Round(time.Second).String(),
 		yes,
 		ui.lastStatus.Prices.Yes.BestBid.StringFixedBank(2),
