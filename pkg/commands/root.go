@@ -85,7 +85,7 @@ func (o *Options) AddPFlags(fs *pflag.FlagSet) {
 		"The simulation runs and outputs the profit/loss results, but no actual transactions are made",
 	)
 	fs.IntVar(&o.Scale, "scale", o.Scale, "Transaction volume scaling factor")
-	fs.StringVarP(&o.Strategy, "strategy", "s", o.Strategy, "Trading Strategy (one of 'discard', 'monkey')")
+	fs.StringVarP(&o.Strategy, "strategy", "s", o.Strategy, "Trading Strategy (one of 'discard', 'monkey', 'randwalk')")
 }
 
 // exampleTpl 运行示例说明模版
@@ -187,6 +187,8 @@ func NewCommand(name string) *cobra.Command {
 				strategy = trading.DiscardStrategy
 			case "monkey":
 				strategy = strategies.NewMonkey()
+			case "randwalk":
+				strategy = strategies.NewRandomWalk()
 			default:
 				return fmt.Errorf("unknown strategy %q", opts.Strategy)
 			}

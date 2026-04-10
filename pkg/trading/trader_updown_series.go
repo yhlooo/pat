@@ -89,6 +89,7 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 		ConditionID: trader.curMarket.ConditionID,
 		YesTokenID:  yesTokenID,
 		NoTokenID:   noTokenID,
+		EndDate:     trader.curMarket.EndDate,
 	}
 	status := Status{
 		CurrentMarket: curMarket,
@@ -198,7 +199,7 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 
 		// 发送当前状态
 		select {
-		case trader.statusChan <- status:
+		case trader.statusChan <- status.Copy():
 		default:
 		}
 	}
@@ -229,6 +230,8 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 	watcher *polymarket.MarketWatcher,
 	event *polymarket.CLOBEvent,
 ) bool {
+	logger := logr.FromContextOrDiscard(ctx)
+
 	changed := false
 
 	// 处理市场事件
@@ -284,20 +287,34 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 			changed = true
 		}
 
+		logger.Info(fmt.Sprintf(
+			"market %s(%s) resolved, winning: %s(%s)",
+			market.Slug, eventData.Market, eventData.WinningOutcome, eventData.WinningAssetId,
+		))
+
 		// 结算持仓
 		winningAssetID := eventData.WinningAssetId
 		for _, assetID := range eventData.AssetIDs {
-			if assetID != winningAssetID {
-				if holding := status.Holding[assetID]; holding != nil {
-					changed = true
-					delete(status.Holding, assetID)
-				}
+			if assetID == winningAssetID {
+				continue
+			}
+			if holding := status.Holding[assetID]; holding != nil {
+				logger.Info(fmt.Sprintf(
+					"settlement of %s %s in %s is 0",
+					holding.Quantity.String(), holding.Type, holding.MarketSlug,
+				))
+				delete(status.Holding, assetID)
+				changed = true
 			}
 		}
 		if holding := status.Holding[winningAssetID]; holding != nil {
-			changed = true
+			logger.Info(fmt.Sprintf(
+				"settlement of %s %s in %s is %sUSD",
+				holding.Quantity.String(), holding.Type, holding.MarketSlug, holding.Quantity.String(),
+			))
 			delete(status.Holding, winningAssetID)
 			status.Cash = status.Cash.Add(holding.Quantity)
+			changed = true
 		}
 
 	default:
@@ -347,6 +364,7 @@ func (trader *UpdownSeriesTrader) rotateMarket(
 		ConditionID: newMarket.ConditionID,
 		YesTokenID:  yesTokenID,
 		NoTokenID:   noTokenID,
+		EndDate:     newMarket.EndDate,
 	}
 
 	trader.lock.Lock()
@@ -464,14 +482,16 @@ func (trader *UpdownSeriesTrader) simulateMatchingOrders(ctx context.Context, st
 			}
 
 			// 剩余的直接以最佳出价/要价成交
-			filledPrice := curPrices.BestAsk
-			if order.Side == Sell {
-				filledPrice = curPrices.BestBid
+			filledPrice := curPrices.BestBid
+			filledQty := order.Quantity
+			if order.Side == Buy {
+				filledPrice = curPrices.BestAsk
+				filledQty = order.Amount.DivRound(filledPrice, 6)
 			}
 			if filledPrice.IsZero() {
 				continue
 			}
-			status.FillOrder(id, filledPrice, order.Amount.DivRound(filledPrice, 6))
+			status.FillOrder(id, filledPrice, filledQty)
 
 		case GTC, GTD:
 			filledPrice := curPrices.Last

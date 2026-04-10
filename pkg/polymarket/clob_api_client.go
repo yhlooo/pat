@@ -219,7 +219,7 @@ func (w *wsCLOBChannelConn) receiveLoop(ctx context.Context) {
 
 		e := CLOBEvent{}
 		if err := json.Unmarshal(raw, &e); err != nil {
-			logger.V(1).Error(err, "unmarshal clob event from json error")
+			logger.V(1).Error(err, fmt.Sprintf("unmarshal clob event from json error, raw: %s", string(raw)))
 			continue
 		}
 
@@ -459,7 +459,7 @@ type NewMarket struct {
 type MarketResolved struct {
 	ID             string       `json:"id"`
 	Market         string       `json:"market"`
-	AssetIDs       []string     `json:"asset_ids"`
+	AssetIDs       []string     `json:"assets_ids"`
 	WinningAssetId string       `json:"winning_asset_id"`
 	WinningOutcome string       `json:"winning_outcome"`
 	EventMessage   EventMessage `json:"event_message,omitempty"`

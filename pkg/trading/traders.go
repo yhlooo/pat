@@ -192,6 +192,23 @@ func (s *Status) FillOrder(id string, price decimal.Decimal, qty decimal.Decimal
 	return true
 }
 
+// Copy 返回一个副本
+func (s *Status) Copy() Status {
+	if s == nil {
+		return Status{}
+	}
+
+	ret := *s
+	if s.Meta != nil {
+		ret.Meta = make(map[string]interface{}, len(s.Meta))
+		for k, v := range s.Meta {
+			ret.Meta[k] = v
+		}
+	}
+
+	return ret
+}
+
 // Market 市场信息
 type Market struct {
 	// 市场 slug
@@ -202,6 +219,8 @@ type Market struct {
 	YesTokenID string `json:"yesTokenID"`
 	// No 代币 ID
 	NoTokenID string `json:"noTokenID"`
+	// 市场结束时间
+	EndDate time.Time `json:"endDate"`
 }
 
 // MarketPrices 市场价格信息

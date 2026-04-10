@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/shopspring/decimal"
 
 	"github.com/yhlooo/pat/pkg/polymarket"
 	"github.com/yhlooo/pat/pkg/trading"
@@ -92,13 +93,16 @@ func (ui *UI) View() string {
 
 	yes, no, _ := ui.curMarket.GetOutcomes()
 
+	totalValue := decimal.Zero
 	holding := ""
 	for _, a := range ui.lastStatus.GetHoldingList() {
 		holding += fmt.Sprintf(
 			"  - %s %s %s worth %s USD\n",
 			a.MarketSlug, a.Type, a.Quantity.Round(2).String(), a.Value.Round(4).String(),
 		)
+		totalValue = totalValue.Add(a.Value)
 	}
+	totalValue = totalValue.Add(ui.lastStatus.Cash)
 
 	pendingOrderList := ui.lastStatus.GetPendingOrderList()
 	slices.Reverse(pendingOrderList)
@@ -168,6 +172,7 @@ Timer: %s
 
 ## Assets
 
+- Total: %s
 - Cash: %s
 - Holding:
 %s
@@ -193,6 +198,7 @@ Timer: %s
 		ui.lastStatus.Prices.No.BestBid.StringFixedBank(2),
 		ui.lastStatus.Prices.No.BestAsk.StringFixedBank(2),
 		ui.lastStatus.Prices.No.Last.StringFixedBank(2),
+		totalValue.StringFixedBank(2),
 		ui.lastStatus.Cash.StringFixedBank(2),
 		holding,
 		pendingOrders,
