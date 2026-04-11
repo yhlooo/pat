@@ -18,17 +18,17 @@ import (
 
 // 模型参数
 type Params struct {
-	S0          float64 // 初始价格
-	Sigma       float64 // 波动率（年化）
-	TimeYears   float64 // 总时长（年）
-	DtSeconds   float64 // 每步间隔（秒）
-	Steps       int     // 模拟步数
+	S0        float64 // 初始价格
+	Sigma     float64 // 波动率（年化）
+	TimeYears float64 // 总时长（年）
+	DtSeconds float64 // 每步间隔（秒）
+	Steps     int     // 模拟步数
 }
 
 // 生成算术随机游走路径
 func arithmeticRandomWalk(p Params, rng *rand.Rand) plotter.XYs {
 	dt := p.TimeYears / float64(p.Steps)
-	sigmaDt := p.Sigma * math.Sqrt(dt) // 每步绝对波动幅度
+	sigmaDt := p.Sigma * math.Sqrt(dt) * 1000 // 放大1000倍以便在图表中可见
 	path := make(plotter.XYs, p.Steps+1)
 	path[0].X = 0
 	path[0].Y = p.S0
