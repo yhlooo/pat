@@ -10,9 +10,19 @@ import (
 	"github.com/yhlooo/pat/pkg/trading"
 )
 
+// ModelType 随机游走模型类型
+type ModelType int
+
+const (
+	// Arithmetic 算术随机游走（绝对波动）
+	Arithmetic ModelType = iota
+	// Geometric 几何随机游走（相对波动）
+	Geometric
+)
+
 // NewRandomWalk 创建随机游走策略
-func NewRandomWalk() *RandomWalk {
-	return &RandomWalk{}
+func NewRandomWalk(model ModelType) *RandomWalk {
+	return &RandomWalk{model: model}
 }
 
 // pricePoint 价格观测点
@@ -23,8 +33,10 @@ type pricePoint struct {
 
 // RandomWalk 随机游走策略
 //
-// 基于随机游走数学模型计算涨跌概率，与市场价格比较进行套利交易
+// 基于随机游走数学模型计算涨跌概率，与市场价格比较进行套利交易。
+// 支持算术随机游走（绝对波动）和几何随机游走（相对波动）两种模型。
 type RandomWalk struct {
+	model         ModelType    // 随机游走模型类型
 	lastTradeTime time.Time    // 上次交易时间
 	priceHistory  []pricePoint // 近期价格观测点（仅保留近 1 分钟）
 }
@@ -49,6 +61,10 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 
 	// 数据缺失时不交易
 	if S0.IsZero() || K.IsZero() || yesPrice.IsZero() {
+		return nil, meta, nil
+	}
+	// 几何模式下价格必须为正值（ln 要求 S > 0）
+	if s.model == Geometric && (S0.LessThanOrEqual(decimal.Zero) || K.LessThanOrEqual(decimal.Zero)) {
 		return nil, meta, nil
 	}
 	// 排除极端值
@@ -76,7 +92,8 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	}
 
 	// 使用 realized variance 估算波动率
-	// σ = √( (1/m) * Σ( (Sᵢ - Sᵢ₋₁)² / (tᵢ - tᵢ₋₁) ) )
+	// Arithmetic: σ = √( (1/m) * Σ( (Sᵢ - Sᵢ₋₁)² / (tᵢ - tᵢ₋₁) ) )
+	// Geometric:  σ = √( (1/m) * Σ( (ln(Sᵢ/Sᵢ₋₁))² / (tᵢ - tᵢ₋₁) ) )
 	var sumSquaredReturns float64
 	validPairs := 0
 	for j := 1; j < len(s.priceHistory); j++ {
@@ -84,8 +101,20 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 		if dt <= 0 {
 			continue
 		}
-		ds := s.priceHistory[j].price.Sub(s.priceHistory[j-1].price)
-		sumSquaredReturns += ds.Mul(ds).Div(decimal.NewFromFloat(dt)).InexactFloat64()
+		var ds float64
+		if s.model == Geometric {
+			// 几何模式：对数收益率，跳过非正值观测点
+			prevPrice := s.priceHistory[j-1].price
+			currPrice := s.priceHistory[j].price
+			if !prevPrice.IsPositive() || !currPrice.IsPositive() {
+				continue
+			}
+			ds = math.Log(currPrice.Div(prevPrice).InexactFloat64())
+		} else {
+			// 算术模式：绝对价格差
+			ds = s.priceHistory[j].price.Sub(s.priceHistory[j-1].price).InexactFloat64()
+		}
+		sumSquaredReturns += ds * ds / dt
 		validPairs++
 	}
 
@@ -102,8 +131,18 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	estimatedAmplitude := sigma * math.Sqrt(n)
 	meta["EstimatedAmplitude"] = estimatedAmplitude
 
-	// 计算概率 P(Yes) = 1 - Φ((K - S0) / (σ * √n))
-	x := K.Sub(S0).InexactFloat64() / estimatedAmplitude
+	// 计算概率 P(Yes) = 1 - Φ((transform(K) - transform(S0)) / (σ * √n))
+	// Arithmetic: transform(S) = S（恒等变换）
+	// Geometric:  transform(S) = ln(S)（对数变换）
+	var s0Transformed, kTransformed float64
+	if s.model == Geometric {
+		s0Transformed = math.Log(S0.InexactFloat64())
+		kTransformed = math.Log(K.InexactFloat64())
+	} else {
+		s0Transformed = S0.InexactFloat64()
+		kTransformed = K.InexactFloat64()
+	}
+	x := (kTransformed - s0Transformed) / estimatedAmplitude
 	pYes := 1.0 - normalCDF(x)
 	meta["PYes"] = pYes
 

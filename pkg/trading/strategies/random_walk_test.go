@@ -104,7 +104,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	}
 
 	t.Run("首次执行应不交易", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		status := makeStatus(time.Now().Add(5*time.Minute), 100.0, 100.0, 0.5)
 		actions, meta, err := s.Execute(ctx, status)
 		if err != nil {
@@ -119,7 +119,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("市场即将结束应不交易", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		status := makeStatus(time.Now().Add(20*time.Second), 100.0, 100.0, 0.5)
 		actions, _, err := s.Execute(ctx, status)
 		if err != nil {
@@ -131,7 +131,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("数据缺失应不交易", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 
 		// Value 为 0
 		status := makeStatus(time.Now().Add(5*time.Minute), 0, 100.0, 0.5)
@@ -156,7 +156,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("偏差在阈值内应不交易", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行：记录状态
@@ -181,7 +181,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("Yes被低估且有No持仓应卖出No", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行
@@ -219,7 +219,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("Yes被低估且无No持仓应买入Yes", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行
@@ -245,7 +245,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("Yes被高估且有Yes持仓应卖出Yes", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行
@@ -279,7 +279,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("Yes被高估且无Yes持仓应买入No", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行
@@ -305,7 +305,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("交易间隔控制", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行
@@ -334,7 +334,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("价格未变化应不交易", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行
@@ -354,7 +354,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("滑点保护设置正确", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行
@@ -378,7 +378,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("缓存中仅有1个点时应不交易", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 第一次执行：记录 1 个点
@@ -405,7 +405,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("过期数据被正确清理", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 手动设置缓存：包含一个 2 分钟前的过期点和一个 30 秒前的有效点
@@ -433,7 +433,7 @@ func TestRandomWalkExecute(t *testing.T) {
 	})
 
 	t.Run("多个观测点时波动率计算正确", func(t *testing.T) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		endDate := time.Now().Add(5 * time.Minute)
 
 		// 构造已知的价格序列，手动填充缓存
@@ -513,7 +513,7 @@ func BenchmarkRandomWalkExecute(b *testing.B) {
 	}
 
 	b.Run("ComputeAndTrade", func(b *testing.B) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
@@ -526,7 +526,7 @@ func BenchmarkRandomWalkExecute(b *testing.B) {
 	})
 
 	b.Run("DeviationWithinThreshold", func(b *testing.B) {
-		s := NewRandomWalk()
+		s := NewRandomWalk(Arithmetic)
 		deviationStatus := status
 		deviationStatus.ResolutionSource.Value = decimal.NewFromFloat(100.05)
 		b.ResetTimer()
@@ -549,4 +549,275 @@ func BenchmarkNormalCDF(b *testing.B) {
 			normalCDF(x)
 		}
 	}
+}
+
+// TestRandomWalkGeometric 测试几何随机游走模型
+func TestRandomWalkGeometric(t *testing.T) {
+	ctx := context.Background()
+
+	// 辅助函数：创建测试状态
+	makeStatus := func(endDate time.Time, value, targetValue, yesPrice float64, holdings ...*trading.Asset) trading.Status {
+		status := trading.Status{
+			CurrentMarket: trading.Market{
+				EndDate: endDate,
+			},
+			ResolutionSource: trading.ResolutionSource{
+				Value:       decimal.NewFromFloat(value),
+				TargetValue: decimal.NewFromFloat(targetValue),
+			},
+			Prices: trading.MarketPrices{
+				Yes: trading.AssetPrices{
+					Last:    decimal.NewFromFloat(yesPrice),
+					BestBid: decimal.NewFromFloat(yesPrice - 0.01),
+					BestAsk: decimal.NewFromFloat(yesPrice + 0.01),
+				},
+				No: trading.AssetPrices{
+					Last:    decimal.NewFromFloat(1 - yesPrice),
+					BestBid: decimal.NewFromFloat(1 - yesPrice - 0.01),
+					BestAsk: decimal.NewFromFloat(1 - yesPrice + 0.01),
+				},
+			},
+			Holding: make(map[string]*trading.Asset),
+		}
+		for i, h := range holdings {
+			status.Holding[string(rune('A'+i))] = h
+		}
+		return status
+	}
+
+	t.Run("概率计算-当前价格高于基准", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		// 第一次执行
+		status := makeStatus(endDate, 100.0, 100.0, 0.5)
+		_, _, _ = s.Execute(ctx, status)
+
+		// 第二次执行：价格上涨
+		time.Sleep(10 * time.Millisecond)
+		status = makeStatus(endDate, 101.0, 100.0, 0.5)
+		_, meta, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if pYes, ok := meta["PYes"]; !ok {
+			t.Error("expected PYes in meta")
+		} else if pYes.(float64) <= 0.5 {
+			t.Errorf("expected PYes > 0.5 when S0 > K, got %v", pYes)
+		}
+	})
+
+	t.Run("概率计算-当前价格低于基准", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		status := makeStatus(endDate, 100.0, 100.0, 0.5)
+		_, _, _ = s.Execute(ctx, status)
+
+		time.Sleep(10 * time.Millisecond)
+		status = makeStatus(endDate, 99.0, 100.0, 0.5)
+		_, meta, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if pYes, ok := meta["PYes"]; !ok {
+			t.Error("expected PYes in meta")
+		} else if pYes.(float64) >= 0.5 {
+			t.Errorf("expected PYes < 0.5 when S0 < K, got %v", pYes)
+		}
+	})
+
+	t.Run("价格非正-不交易", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		// S0 为 0
+		status := makeStatus(endDate, 0, 100.0, 0.5)
+		actions, _, _ := s.Execute(ctx, status)
+		if len(actions) != 0 {
+			t.Error("expected no actions when S0 is 0 in geometric mode")
+		}
+
+		// S0 为负值
+		status = makeStatus(endDate, -10.0, 100.0, 0.5)
+		actions, _, _ = s.Execute(ctx, status)
+		if len(actions) != 0 {
+			t.Error("expected no actions when S0 is negative in geometric mode")
+		}
+
+		// K 为负值
+		status = makeStatus(endDate, 100.0, -10.0, 0.5)
+		actions, _, _ = s.Execute(ctx, status)
+		if len(actions) != 0 {
+			t.Error("expected no actions when K is negative in geometric mode")
+		}
+	})
+
+	t.Run("波动率估算-对数收益率", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		// 构造价格序列，验证对数收益率波动率计算
+		baseTime := time.Now().Add(-30 * time.Second)
+		s.priceHistory = []pricePoint{
+			{time: baseTime, price: decimal.NewFromFloat(100.0)},
+			{time: baseTime.Add(10 * time.Second), price: decimal.NewFromFloat(101.0)},
+			{time: baseTime.Add(20 * time.Second), price: decimal.NewFromFloat(100.5)},
+			{time: baseTime.Add(30 * time.Second), price: decimal.NewFromFloat(101.5)},
+		}
+
+		status := makeStatus(endDate, 101.5, 100.0, 0.3)
+		_, meta, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		pYes, ok := meta["PYes"]
+		if !ok {
+			t.Fatal("expected PYes in meta")
+		}
+		if pYes.(float64) <= 0.5 {
+			t.Errorf("expected PYes > 0.5 when S0 > K, got %v", pYes)
+		}
+	})
+
+	t.Run("波动率估算-跳过非正值观测点", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		baseTime := time.Now().Add(-30 * time.Second)
+		s.priceHistory = []pricePoint{
+			{time: baseTime, price: decimal.NewFromFloat(100.0)},
+			{time: baseTime.Add(10 * time.Second), price: decimal.NewFromFloat(0)},     // 非正值
+			{time: baseTime.Add(20 * time.Second), price: decimal.NewFromFloat(101.0)}, // 正值
+			{time: baseTime.Add(30 * time.Second), price: decimal.NewFromFloat(100.5)}, // 正值
+		}
+
+		status := makeStatus(endDate, 100.5, 100.0, 0.3)
+		_, meta, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// 应该跳过含 0 的观测点对，使用有效对 (101.0→100.5) 和 (100.5→100.5) 计算
+		pYes, ok := meta["PYes"]
+		if !ok {
+			t.Fatal("expected PYes in meta")
+		}
+		if pYes.(float64) <= 0.5 {
+			t.Errorf("expected PYes > 0.5 when S0 > K, got %v", pYes)
+		}
+	})
+
+	t.Run("Yes被低估且有No持仓应卖出No", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		status := makeStatus(endDate, 100.0, 100.0, 0.5)
+		_, _, _ = s.Execute(ctx, status)
+
+		time.Sleep(10 * time.Millisecond)
+		noHolding := &trading.Asset{
+			Type:             trading.No,
+			Quantity:         decimal.NewFromFloat(10),
+			TradableQuantity: decimal.NewFromFloat(10),
+		}
+		status = makeStatus(endDate, 101.0, 100.0, 0.3, noHolding)
+		actions, meta, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d", len(actions))
+		}
+		if actions[0].CreateOrder.TokenType != trading.No {
+			t.Errorf("expected No token type, got %v", actions[0].CreateOrder.TokenType)
+		}
+		if actions[0].CreateOrder.Side != trading.Sell {
+			t.Errorf("expected Sell side, got %v", actions[0].CreateOrder.Side)
+		}
+		if pYes, ok := meta["PYes"]; !ok || pYes.(float64) < 0.5 {
+			t.Errorf("expected PYes > 0.5, got %v", pYes)
+		}
+	})
+
+	t.Run("Yes被低估且无No持仓应买入Yes", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		status := makeStatus(endDate, 100.0, 100.0, 0.5)
+		_, _, _ = s.Execute(ctx, status)
+
+		time.Sleep(10 * time.Millisecond)
+		status = makeStatus(endDate, 101.0, 100.0, 0.3)
+		actions, _, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d", len(actions))
+		}
+		if actions[0].CreateOrder.TokenType != trading.Yes {
+			t.Errorf("expected Yes token type, got %v", actions[0].CreateOrder.TokenType)
+		}
+		if actions[0].CreateOrder.Side != trading.Buy {
+			t.Errorf("expected Buy side, got %v", actions[0].CreateOrder.Side)
+		}
+	})
+
+	t.Run("Yes被高估且有Yes持仓应卖出Yes", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		status := makeStatus(endDate, 100.0, 100.0, 0.5)
+		_, _, _ = s.Execute(ctx, status)
+
+		time.Sleep(10 * time.Millisecond)
+		yesHolding := &trading.Asset{
+			Type:             trading.Yes,
+			Quantity:         decimal.NewFromFloat(10),
+			TradableQuantity: decimal.NewFromFloat(10),
+		}
+		status = makeStatus(endDate, 99.0, 100.0, 0.7, yesHolding)
+		actions, meta, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d", len(actions))
+		}
+		if actions[0].CreateOrder.TokenType != trading.Yes {
+			t.Errorf("expected Yes token type, got %v", actions[0].CreateOrder.TokenType)
+		}
+		if actions[0].CreateOrder.Side != trading.Sell {
+			t.Errorf("expected Sell side, got %v", actions[0].CreateOrder.Side)
+		}
+		if pYes, ok := meta["PYes"]; !ok || pYes.(float64) > 0.5 {
+			t.Errorf("expected PYes < 0.5, got %v", pYes)
+		}
+	})
+
+	t.Run("Yes被高估且无Yes持仓应买入No", func(t *testing.T) {
+		s := NewRandomWalk(Geometric)
+		endDate := time.Now().Add(5 * time.Minute)
+
+		status := makeStatus(endDate, 100.0, 100.0, 0.5)
+		_, _, _ = s.Execute(ctx, status)
+
+		time.Sleep(10 * time.Millisecond)
+		status = makeStatus(endDate, 99.0, 100.0, 0.7)
+		actions, _, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(actions) != 1 {
+			t.Fatalf("expected 1 action, got %d", len(actions))
+		}
+		if actions[0].CreateOrder.TokenType != trading.No {
+			t.Errorf("expected No token type, got %v", actions[0].CreateOrder.TokenType)
+		}
+		if actions[0].CreateOrder.Side != trading.Buy {
+			t.Errorf("expected Buy side, got %v", actions[0].CreateOrder.Side)
+		}
+	})
 }
