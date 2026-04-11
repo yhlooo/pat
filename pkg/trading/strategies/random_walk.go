@@ -45,13 +45,9 @@ var _ trading.Strategy = (*RandomWalk)(nil)
 
 // Execute 执行策略
 func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]trading.Action, map[string]interface{}, error) {
-	now := time.Now()
-	meta := make(map[string]interface{})
-
-	// 市场结束前 30 秒内不交易
-	remainingTime := status.CurrentMarket.EndDate.Sub(now)
-	if remainingTime <= 30*time.Second {
-		return nil, meta, nil
+	// 数据延迟超过 2s 不交易
+	if status.MarketChannelDelay > 2*time.Second || status.RTDSDelay > 2*time.Second {
+		return nil, nil, nil
 	}
 
 	// 获取必要数据
@@ -61,15 +57,24 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 
 	// 数据缺失时不交易
 	if S0.IsZero() || K.IsZero() || yesPrice.IsZero() {
-		return nil, meta, nil
+		return nil, nil, nil
 	}
+
+	now := time.Now()
+
+	// 市场结束前 10 秒内不交易
+	remainingTime := status.CurrentMarket.EndDate.Sub(now)
+	if remainingTime <= 10*time.Second {
+		return nil, nil, nil
+	}
+
 	// 几何模式下价格必须为正值（ln 要求 S > 0）
 	if s.model == Geometric && (S0.LessThanOrEqual(decimal.Zero) || K.LessThanOrEqual(decimal.Zero)) {
-		return nil, meta, nil
+		return nil, nil, nil
 	}
 	// 排除极端值
 	if yesPrice.LessThan(decimal.NewFromFloat(0.04)) || yesPrice.GreaterThan(decimal.NewFromFloat(0.96)) {
-		return nil, meta, nil
+		return nil, nil, nil
 	}
 
 	// 计算剩余秒数
@@ -88,7 +93,7 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 
 	// 至少需要 2 个观测点才能估算波动率
 	if len(s.priceHistory) < 2 {
-		return nil, meta, nil
+		return nil, nil, nil
 	}
 
 	// 使用 realized variance 估算波动率
@@ -119,17 +124,16 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	}
 
 	if validPairs == 0 {
-		return nil, meta, nil
+		return nil, nil, nil
 	}
 
 	sigma := math.Sqrt(sumSquaredReturns / float64(validPairs))
 	if sigma == 0 {
-		return nil, meta, nil
+		return nil, nil, nil
 	}
 
 	// 预估波动幅度 = σ * √n （剩余时间内的预期价格波动标准差）
 	estimatedAmplitude := sigma * math.Sqrt(n)
-	meta["EstimatedAmplitude"] = estimatedAmplitude
 
 	// 计算概率 P(Yes) = 1 - Φ((transform(K) - transform(S0)) / (σ * √n))
 	// Arithmetic: transform(S) = S（恒等变换）
@@ -144,7 +148,11 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	}
 	x := (kTransformed - s0Transformed) / estimatedAmplitude
 	pYes := 1.0 - normalCDF(x)
-	meta["PYes"] = pYes
+
+	meta := map[string]interface{}{
+		"EstimatedAmplitude": estimatedAmplitude,
+		"PYes":               pYes,
+	}
 
 	// 交易间隔控制
 	if !s.lastTradeTime.IsZero() && now.Sub(s.lastTradeTime) < 30*time.Second {
