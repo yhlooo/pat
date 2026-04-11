@@ -163,25 +163,25 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	threshold := decimal.NewFromFloat(0.2)
 
 	// 滑点保护常量
-	slippage := decimal.NewFromFloat(0.2)
+	slippage := decimal.NewFromFloat(0.1)
 
 	var sellHolding *trading.Asset
-	var sellPrices trading.AssetPrices
+	var sellPrices decimal.Decimal
 	var buyType trading.TokenType
-	var buyPrices trading.AssetPrices
+	var buyPrices decimal.Decimal
 	switch {
 	case deviation.GreaterThan(threshold):
 		// Yes 被低估，应买入 Yes 或卖出 No
 		sellHolding = s.findHolding(status, trading.No)
 		buyType = trading.Yes
-		sellPrices = status.Prices.No
-		buyPrices = status.Prices.Yes
+		sellPrices = decimal.New(1, 0).Sub(status.Prices.Yes.Last).Sub(slippage)
+		buyPrices = status.Prices.Yes.Last.Add(slippage)
 	case deviation.LessThan(threshold.Neg()):
 		// Yes 被高估，应卖出 Yes 或买入 No
 		sellHolding = s.findHolding(status, trading.Yes)
 		buyType = trading.No
-		sellPrices = status.Prices.Yes
-		buyPrices = status.Prices.No
+		sellPrices = status.Prices.Yes.Last.Sub(slippage)
+		buyPrices = decimal.New(1, 0).Sub(status.Prices.Yes.Last).Add(slippage)
 	}
 
 	var actions []trading.Action
@@ -193,7 +193,7 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 				TokenType: sellHolding.Type,
 				Side:      trading.Sell,
 				Type:      trading.FOK,
-				Price:     sellPrices.BestBid.Sub(slippage),
+				Price:     sellPrices,
 				Quantity:  sellHolding.TradableQuantity,
 			}})
 			s.curMarketHoldingAmount = 0
@@ -210,7 +210,7 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 					TokenType: buyType,
 					Side:      trading.Buy,
 					Type:      trading.FOK,
-					Price:     buyPrices.BestAsk.Add(slippage),
+					Price:     buyPrices,
 					Amount:    decimal.NewFromInt(1),
 				}})
 			}
