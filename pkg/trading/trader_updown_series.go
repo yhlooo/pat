@@ -148,7 +148,7 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 			}
 
 			// 处理 RTDS 事件
-			if ok := trader.handleRTDSEvent(ctx, &status, event); !ok {
+			if changed := trader.handleRTDSEvent(ctx, &status, event); !changed {
 				continue
 			}
 
@@ -160,7 +160,7 @@ func (trader *UpdownSeriesTrader) runLoop(ctx context.Context) {
 			}
 
 			// 处理市场事件
-			if ok := trader.handleMarketChannelEvent(ctx, &status, marketWatcher, event); !ok {
+			if changed := trader.handleMarketChannelEvent(ctx, &status, marketWatcher, event); !changed {
 				continue
 			}
 
@@ -220,8 +220,11 @@ func (trader *UpdownSeriesTrader) handleRTDSEvent(
 		return false
 	}
 	status.RTDSDelay = time.Duration(time.Now().UnixNano() - event.Timestamp*1000000)
-	status.ResolutionSource.Value = decimal.NewFromFloat(event.Payload.Value)
-	return true
+	if newPrice := decimal.NewFromFloat(event.Payload.Value); !newPrice.Equal(status.ResolutionSource.Value) {
+		status.ResolutionSource.Value = newPrice
+		return true
+	}
+	return false
 }
 
 // handleMarketChannelEvent 处理市场事件
@@ -246,18 +249,26 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 			for _, change := range eventData.PriceChanges {
 				switch change.AssetID {
 				case status.CurrentMarket.YesTokenID:
+					if change.BestAsk.Equal(status.Prices.Yes.BestAsk) &&
+						change.BestBid.Equal(status.Prices.Yes.BestBid) {
+						continue
+					}
 					status.Prices.Yes.BestAsk = change.BestAsk
 					status.Prices.Yes.BestBid = change.BestBid
 				case status.CurrentMarket.NoTokenID:
+					if change.BestAsk.Equal(status.Prices.No.BestAsk) &&
+						change.BestBid.Equal(status.Prices.No.BestBid) {
+						continue
+					}
 					status.Prices.No.BestAsk = change.BestAsk
 					status.Prices.No.BestBid = change.BestBid
 				}
+				changed = true
 				logger.V(1).Info(fmt.Sprintf(
 					"received price change: market: %s, bestBid: %s, bestAsk: %s",
 					eventData.Market, change.BestBid, change.BestAsk,
 				))
 			}
-			changed = true
 		}
 
 	case polymarket.EventLastTradePrice:
@@ -272,15 +283,20 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 		if eventData.Market == status.CurrentMarket.ConditionID {
 			switch eventData.AssetID {
 			case status.CurrentMarket.YesTokenID:
-				status.Prices.Yes.Last = eventData.Price
+				if !eventData.Price.Equal(status.Prices.Yes.Last) {
+					status.Prices.Yes.Last = eventData.Price
+					changed = true
+				}
 			case status.CurrentMarket.NoTokenID:
-				status.Prices.No.Last = eventData.Price
+				if !eventData.Price.Equal(status.Prices.No.Last) {
+					status.Prices.No.Last = eventData.Price
+					changed = true
+				}
 			}
-			changed = true
 		}
 
 		// 更新持仓价值
-		if holding := status.Holding[eventData.AssetID]; holding != nil {
+		if holding := status.Holding[eventData.AssetID]; holding != nil && !holding.Price.Equal(eventData.Price) {
 			holding.Price = eventData.Price
 			holding.Value = holding.Quantity.Mul(holding.Price).Round(6)
 			changed = true
