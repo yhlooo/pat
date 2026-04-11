@@ -52,6 +52,19 @@ type Status struct {
 	Holding map[string]*Asset `json:"holding,omitempty"`
 }
 
+// GetMetaKeys 获取元数据键
+func (s *Status) GetMetaKeys() []string {
+	if len(s.Meta) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(s.Meta))
+	for k := range s.Meta {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // GetPendingOrderList 获取等待订单列表
 func (s *Status) GetPendingOrderList() []Order {
 	if len(s.PendingOrders) == 0 {

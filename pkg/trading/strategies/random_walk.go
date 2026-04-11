@@ -15,13 +15,18 @@ func NewRandomWalk() *RandomWalk {
 	return &RandomWalk{}
 }
 
+// pricePoint 价格观测点
+type pricePoint struct {
+	time  time.Time
+	price decimal.Decimal
+}
+
 // RandomWalk 随机游走策略
 //
 // 基于随机游走数学模型计算涨跌概率，与市场价格比较进行套利交易
 type RandomWalk struct {
-	lastTradeTime time.Time       // 上次交易时间
-	lastExecTime  time.Time       // 上次执行时间
-	lastPrice     decimal.Decimal // 上次执行时的资产价格
+	lastTradeTime time.Time    // 上次交易时间
+	priceHistory  []pricePoint // 近期价格观测点（仅保留近 1 分钟）
 }
 
 var _ trading.Strategy = (*RandomWalk)(nil)
@@ -54,35 +59,53 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	// 计算剩余秒数
 	n := float64(int(remainingTime.Seconds()))
 
-	// 估算波动率
-	if s.lastExecTime.IsZero() {
-		// 首次执行，记录当前状态，不交易
-		s.lastExecTime = now
-		s.lastPrice = S0
+	// 记录当前观测点
+	s.priceHistory = append(s.priceHistory, pricePoint{time: now, price: S0})
+
+	// 清理过期数据（仅保留近 1 分钟）
+	cutoff := now.Add(-time.Minute)
+	i := 0
+	for i < len(s.priceHistory) && s.priceHistory[i].time.Before(cutoff) {
+		i++
+	}
+	s.priceHistory = s.priceHistory[i:]
+
+	// 至少需要 2 个观测点才能估算波动率
+	if len(s.priceHistory) < 2 {
 		return nil, meta, nil
 	}
 
-	timeDiff := now.Sub(s.lastExecTime).Seconds()
-	if timeDiff <= 0 {
+	// 使用 realized variance 估算波动率
+	// σ = √( (1/m) * Σ( (Sᵢ - Sᵢ₋₁)² / (tᵢ - tᵢ₋₁) ) )
+	var sumSquaredReturns float64
+	validPairs := 0
+	for j := 1; j < len(s.priceHistory); j++ {
+		dt := s.priceHistory[j].time.Sub(s.priceHistory[j-1].time).Seconds()
+		if dt <= 0 {
+			continue
+		}
+		ds := s.priceHistory[j].price.Sub(s.priceHistory[j-1].price)
+		sumSquaredReturns += ds.Mul(ds).Div(decimal.NewFromFloat(dt)).InexactFloat64()
+		validPairs++
+	}
+
+	if validPairs == 0 {
 		return nil, meta, nil
 	}
 
-	sigma := S0.Sub(s.lastPrice).Abs().Div(decimal.NewFromFloat(timeDiff))
-	if sigma.IsZero() {
-		// 价格未变化，更新记录但不交易
-		s.lastExecTime = now
-		s.lastPrice = S0
+	sigma := math.Sqrt(sumSquaredReturns / float64(validPairs))
+	if sigma == 0 {
 		return nil, meta, nil
 	}
+
+	// 预估波动幅度 = σ * √n （剩余时间内的预期价格波动标准差）
+	estimatedAmplitude := sigma * math.Sqrt(n)
+	meta["EstimatedAmplitude"] = estimatedAmplitude
 
 	// 计算概率 P(Yes) = 1 - Φ((K - S0) / (σ * √n))
-	x := K.Sub(S0).Div(sigma.Mul(decimal.NewFromFloat(math.Sqrt(n)))).InexactFloat64()
+	x := K.Sub(S0).InexactFloat64() / estimatedAmplitude
 	pYes := 1.0 - normalCDF(x)
 	meta["PYes"] = pYes
-
-	// 更新执行记录
-	s.lastExecTime = now
-	s.lastPrice = S0
 
 	// 交易间隔控制
 	if !s.lastTradeTime.IsZero() && now.Sub(s.lastTradeTime) < 30*time.Second {

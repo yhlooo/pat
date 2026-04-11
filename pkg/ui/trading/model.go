@@ -87,8 +87,8 @@ func (ui *UI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View 渲染显示内容
 func (ui *UI) View() string {
 	meta := ""
-	for k, v := range ui.lastStatus.Meta {
-		meta += fmt.Sprintf("  %s: %v\n", k, v)
+	for _, k := range ui.lastStatus.GetMetaKeys() {
+		meta += fmt.Sprintf("  %s: %v\n", k, ui.lastStatus.Meta[k])
 	}
 
 	yes, no, _ := ui.curMarket.GetOutcomes()

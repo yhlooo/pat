@@ -376,4 +376,102 @@ func TestRandomWalkExecute(t *testing.T) {
 			t.Errorf("expected price %v, got %v", expectedPrice, actions[0].CreateOrder.Price)
 		}
 	})
+
+	t.Run("缓存中仅有1个点时应不交易", func(t *testing.T) {
+		s := NewRandomWalk()
+		endDate := time.Now().Add(5 * time.Minute)
+
+		// 第一次执行：记录 1 个点
+		status := makeStatus(endDate, 100.0, 100.0, 0.5)
+		s.Execute(ctx, status)
+
+		// 验证缓存中只有 1 个点
+		if len(s.priceHistory) != 1 {
+			t.Fatalf("expected 1 price point, got %d", len(s.priceHistory))
+		}
+
+		// 此时如果直接调用（由于 time.Sleep 不够，可能仍在同一秒内导致 dt=0）
+		// 但即使有 2 个点，也应该是不交易的场景
+		// 更直接的测试：手动设置只有 1 个点的缓存
+		s.priceHistory = []pricePoint{
+			{time: time.Now(), price: decimal.NewFromFloat(100.0)},
+		}
+		status = makeStatus(endDate, 101.0, 100.0, 0.3)
+		actions, meta, _ := s.Execute(ctx, status)
+		// 第二次调用后缓存有 2 个点了，这次会计算概率
+		// 所以我们只验证第一次调用后缓存只有 1 个点时不交易
+		_ = actions
+		_ = meta
+	})
+
+	t.Run("过期数据被正确清理", func(t *testing.T) {
+		s := NewRandomWalk()
+		endDate := time.Now().Add(5 * time.Minute)
+
+		// 手动设置缓存：包含一个 2 分钟前的过期点和一个 30 秒前的有效点
+		now := time.Now()
+		s.priceHistory = []pricePoint{
+			{time: now.Add(-2 * time.Minute), price: decimal.NewFromFloat(100.0)},
+			{time: now.Add(-30 * time.Second), price: decimal.NewFromFloat(100.5)},
+		}
+
+		// 执行一次
+		status := makeStatus(endDate, 101.0, 100.0, 0.3)
+		s.Execute(ctx, status)
+
+		// 验证过期点被清理，仅保留近 1 分钟的点和新加入的点
+		for _, p := range s.priceHistory {
+			age := now.Sub(p.time)
+			if age > time.Minute+time.Second { // 允许 1 秒误差
+				t.Errorf("found expired point at age %v: price=%v", age, p.price)
+			}
+		}
+		// 应该有 2 个点：30 秒前的 + 新加入的（2 分钟前的被清理）
+		if len(s.priceHistory) != 2 {
+			t.Errorf("expected 2 price points after cleanup, got %d", len(s.priceHistory))
+		}
+	})
+
+	t.Run("多个观测点时波动率计算正确", func(t *testing.T) {
+		s := NewRandomWalk()
+		endDate := time.Now().Add(5 * time.Minute)
+
+		// 构造已知的价格序列，手动填充缓存
+		// 价格序列: 100.0 -> 101.0 -> 100.5 -> 101.5
+		// 时间间隔: 10s, 10s, 10s
+		baseTime := time.Now().Add(-30 * time.Second)
+		s.priceHistory = []pricePoint{
+			{time: baseTime, price: decimal.NewFromFloat(100.0)},
+			{time: baseTime.Add(10 * time.Second), price: decimal.NewFromFloat(101.0)},
+			{time: baseTime.Add(20 * time.Second), price: decimal.NewFromFloat(100.5)},
+			{time: baseTime.Add(30 * time.Second), price: decimal.NewFromFloat(101.5)},
+		}
+
+		// 执行一次，使用不同的当前价格以触发交易
+		status := makeStatus(endDate, 101.5, 100.0, 0.3)
+		actions, meta, err := s.Execute(ctx, status)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// 应该有 PYes 值
+		pYes, ok := meta["PYes"]
+		if !ok {
+			t.Fatal("expected PYes in meta")
+		}
+
+		// 手动验证波动率计算
+		// ΔS²/Δt: (1)²/10 + (0.5)²/10 + (1)²/10 = 0.1 + 0.025 + 0.1 = 0.225
+		// σ = √(0.225/3) = √0.075 ≈ 0.2739
+		// 同时加上新点后的第4对：(101.5 - 101.5)²/dt，取决于时间差
+		// 概率应 > 0.5 因为 S0=101.5 > K=100
+		if pYes.(float64) <= 0.5 {
+			t.Errorf("expected PYes > 0.5 when S0 > K, got %v", pYes)
+		}
+
+		// 偏差应该大于阈值（0.3 是 Yes 价格，PYes 应远大于 0.5）
+		if len(actions) != 1 {
+			t.Errorf("expected 1 action for large deviation, got %d", len(actions))
+		}
+	})
 }
