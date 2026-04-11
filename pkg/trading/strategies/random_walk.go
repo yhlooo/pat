@@ -156,17 +156,6 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 		s.curMarketHoldingAmount = 0
 	}
 
-	meta := map[string]interface{}{
-		"EstimatedAmplitude": estimatedAmplitude,
-		"PYes":               pYes,
-		"HoldingAmount":      s.curMarketHoldingAmount,
-	}
-
-	// 交易间隔控制
-	if !s.lastTradeTime.IsZero() && now.Sub(s.lastTradeTime) < 30*time.Second {
-		return nil, meta, nil
-	}
-
 	// 计算偏差
 	deviation := decimal.NewFromFloat(pYes).Sub(yesPrice)
 
@@ -231,7 +220,12 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 		s.lastTradeTime = now
 	}
 
-	return actions, meta, nil
+	return actions, map[string]interface{}{
+		"EstimatedAmplitude": estimatedAmplitude,
+		"PYes":               pYes,
+		"HoldingAmount":      s.curMarketHoldingAmount,
+		"Deviation":          deviation.StringFixed(4),
+	}, nil
 }
 
 // findHolding 查找指定类型的持仓
