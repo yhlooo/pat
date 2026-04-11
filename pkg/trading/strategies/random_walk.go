@@ -36,9 +36,11 @@ type pricePoint struct {
 // 基于随机游走数学模型计算涨跌概率，与市场价格比较进行套利交易。
 // 支持算术随机游走（绝对波动）和几何随机游走（相对波动）两种模型。
 type RandomWalk struct {
-	model         ModelType    // 随机游走模型类型
-	lastTradeTime time.Time    // 上次交易时间
-	priceHistory  []pricePoint // 近期价格观测点（仅保留近 1 分钟）
+	model                  ModelType    // 随机游走模型类型
+	lastTradeTime          time.Time    // 上次交易时间
+	priceHistory           []pricePoint // 近期价格观测点（仅保留近 1 分钟）
+	curMarket              string
+	curMarketHoldingAmount int
 }
 
 var _ trading.Strategy = (*RandomWalk)(nil)
@@ -149,9 +151,15 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	x := (kTransformed - s0Transformed) / estimatedAmplitude
 	pYes := 1.0 - normalCDF(x)
 
+	if s.curMarket != status.CurrentMarket.Slug {
+		s.curMarket = status.CurrentMarket.Slug
+		s.curMarketHoldingAmount = 0
+	}
+
 	meta := map[string]interface{}{
 		"EstimatedAmplitude": estimatedAmplitude,
 		"PYes":               pYes,
+		"HoldingAmount":      s.curMarketHoldingAmount,
 	}
 
 	// 交易间隔控制
@@ -168,56 +176,57 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 	// 滑点保护常量
 	slippage := decimal.NewFromFloat(0.2)
 
-	var actions []trading.Action
-
+	var sellHolding *trading.Asset
+	var sellPrices trading.AssetPrices
+	var buyType trading.TokenType
+	var buyPrices trading.AssetPrices
 	switch {
 	case deviation.GreaterThan(threshold):
 		// Yes 被低估，应买入 Yes 或卖出 No
-		noHolding := s.findHolding(status, trading.No)
-		if noHolding != nil && noHolding.TradableQuantity.GreaterThan(decimal.Zero) {
-			// 有 No 持仓，优先卖出
-			actions = append(actions, trading.Action{CreateOrder: &trading.CreateOrder{
-				TokenType: trading.No,
-				Side:      trading.Sell,
-				Type:      trading.FOK,
-				Price:     status.Prices.No.BestBid.Sub(slippage),
-				Quantity:  noHolding.TradableQuantity,
-			}})
-		} else {
-			// 无 No 持仓，买入 Yes
-			actions = append(actions, trading.Action{CreateOrder: &trading.CreateOrder{
-				TokenType: trading.Yes,
-				Side:      trading.Buy,
-				Type:      trading.FOK,
-				Price:     status.Prices.Yes.BestAsk.Add(slippage),
-				Amount:    decimal.NewFromInt(1),
-			}})
-		}
-
+		sellHolding = s.findHolding(status, trading.No)
+		buyType = trading.Yes
+		sellPrices = status.Prices.No
+		buyPrices = status.Prices.Yes
 	case deviation.LessThan(threshold.Neg()):
 		// Yes 被高估，应卖出 Yes 或买入 No
-		yesHolding := s.findHolding(status, trading.Yes)
-		if yesHolding != nil && yesHolding.TradableQuantity.GreaterThan(decimal.Zero) {
-			// 有 Yes 持仓，优先卖出
-			actions = append(actions, trading.Action{CreateOrder: &trading.CreateOrder{
-				TokenType: trading.Yes,
-				Side:      trading.Sell,
-				Type:      trading.FOK,
-				Price:     status.Prices.Yes.BestBid.Sub(slippage),
-				Quantity:  yesHolding.TradableQuantity,
-			}})
-		} else {
-			// 无 Yes 持仓，买入 No
-			actions = append(actions, trading.Action{CreateOrder: &trading.CreateOrder{
-				TokenType: trading.No,
-				Side:      trading.Buy,
-				Type:      trading.FOK,
-				Price:     status.Prices.No.BestAsk.Add(slippage),
-				Amount:    decimal.NewFromInt(1),
-			}})
-		}
+		sellHolding = s.findHolding(status, trading.Yes)
+		buyType = trading.No
+		sellPrices = status.Prices.Yes
+		buyPrices = status.Prices.No
 	}
 
+	var actions []trading.Action
+
+	if buyType != "" {
+		if sellHolding != nil && sellHolding.TradableQuantity.IsPositive() {
+			// 有反向持仓，优先卖出
+			actions = append(actions, trading.Action{CreateOrder: &trading.CreateOrder{
+				TokenType: sellHolding.Type,
+				Side:      trading.Sell,
+				Type:      trading.FOK,
+				Price:     sellPrices.BestBid.Sub(slippage),
+				Quantity:  sellHolding.TradableQuantity,
+			}})
+			s.curMarketHoldingAmount = 0
+		} else {
+			// 无反向持仓，正向买入
+			switch {
+			case !s.lastTradeTime.IsZero() && now.Sub(s.lastTradeTime) < 30*time.Second:
+				// 买入间隔时长限制
+			case s.curMarketHoldingAmount >= 2:
+				// 单边持仓限制
+			default:
+				s.curMarketHoldingAmount++
+				actions = append(actions, trading.Action{CreateOrder: &trading.CreateOrder{
+					TokenType: buyType,
+					Side:      trading.Buy,
+					Type:      trading.FOK,
+					Price:     buyPrices.BestAsk.Add(slippage),
+					Amount:    decimal.NewFromInt(1),
+				}})
+			}
+		}
+	}
 	if len(actions) > 0 {
 		s.lastTradeTime = now
 	}
@@ -228,7 +237,7 @@ func (s *RandomWalk) Execute(_ context.Context, status trading.Status) ([]tradin
 // findHolding 查找指定类型的持仓
 func (s *RandomWalk) findHolding(status trading.Status, tokenType trading.TokenType) *trading.Asset {
 	for _, holding := range status.Holding {
-		if holding.Type == tokenType {
+		if holding.MarketSlug == status.CurrentMarket.Slug && holding.Type == tokenType {
 			return holding
 		}
 	}
