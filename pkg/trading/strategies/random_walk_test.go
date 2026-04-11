@@ -161,7 +161,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行：记录状态
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：价格变化但偏差在阈值内
 		time.Sleep(10 * time.Millisecond) // 确保有足够时间差
@@ -186,7 +186,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：价格大幅上涨，Yes 价格很低（被低估）
 		// 设置 Yes 价格为 0.3，但概率应该很高
@@ -224,7 +224,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：价格大幅上涨，Yes 价格很低（被低估）
 		time.Sleep(10 * time.Millisecond)
@@ -250,7 +250,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：价格大幅下跌，Yes 价格很高（被高估）
 		time.Sleep(10 * time.Millisecond)
@@ -284,7 +284,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：价格大幅下跌，Yes 价格很高（被高估）
 		time.Sleep(10 * time.Millisecond)
@@ -310,7 +310,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：触发交易
 		time.Sleep(10 * time.Millisecond)
@@ -339,7 +339,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：价格相同
 		time.Sleep(10 * time.Millisecond)
@@ -359,7 +359,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 第二次执行：触发买入 Yes
 		time.Sleep(10 * time.Millisecond)
@@ -383,7 +383,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 第一次执行：记录 1 个点
 		status := makeStatus(endDate, 100.0, 100.0, 0.5)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 验证缓存中只有 1 个点
 		if len(s.priceHistory) != 1 {
@@ -417,7 +417,7 @@ func TestRandomWalkExecute(t *testing.T) {
 
 		// 执行一次
 		status := makeStatus(endDate, 101.0, 100.0, 0.3)
-		s.Execute(ctx, status)
+		_, _, _ = s.Execute(ctx, status)
 
 		// 验证过期点被清理，仅保留近 1 分钟的点和新加入的点
 		for _, p := range s.priceHistory {
@@ -474,4 +474,79 @@ func TestRandomWalkExecute(t *testing.T) {
 			t.Errorf("expected 1 action for large deviation, got %d", len(actions))
 		}
 	})
+}
+
+func BenchmarkRandomWalkExecute(b *testing.B) {
+	ctx := context.Background()
+
+	// 构造固定价格历史
+	history := func() []pricePoint {
+		now := time.Now()
+		base := now.Add(-50 * time.Second)
+		pts := make([]pricePoint, 10)
+		for i := range pts {
+			pts[i] = pricePoint{
+				time:  base.Add(time.Duration(i*5) * time.Second),
+				price: decimal.NewFromFloat(100.0 + float64(i%3)*0.5),
+			}
+		}
+		return pts
+	}()
+
+	status := trading.Status{
+		CurrentMarket: trading.Market{EndDate: time.Now().Add(5 * time.Minute)},
+		ResolutionSource: trading.ResolutionSource{
+			Value:       decimal.NewFromFloat(101.5),
+			TargetValue: decimal.NewFromFloat(100.0),
+		},
+		Prices: trading.MarketPrices{
+			Yes: trading.AssetPrices{
+				Last: decimal.NewFromFloat(0.3), BestBid: decimal.NewFromFloat(0.29), BestAsk: decimal.NewFromFloat(0.31),
+			},
+			No: trading.AssetPrices{
+				Last: decimal.NewFromFloat(0.7), BestBid: decimal.NewFromFloat(0.69), BestAsk: decimal.NewFromFloat(0.71),
+			},
+		},
+		Holding: map[string]*trading.Asset{
+			"no": {Type: trading.No, TradableQuantity: decimal.NewFromFloat(10)},
+		},
+	}
+
+	b.Run("ComputeAndTrade", func(b *testing.B) {
+		s := NewRandomWalk()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s.lastTradeTime = time.Time{}
+			s.priceHistory = make([]pricePoint, len(history))
+			copy(s.priceHistory, history)
+			b.StartTimer()
+			_, _, _ = s.Execute(ctx, status)
+		}
+	})
+
+	b.Run("DeviationWithinThreshold", func(b *testing.B) {
+		s := NewRandomWalk()
+		deviationStatus := status
+		deviationStatus.ResolutionSource.Value = decimal.NewFromFloat(100.05)
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			s.lastTradeTime = time.Time{}
+			s.priceHistory = make([]pricePoint, len(history))
+			copy(s.priceHistory, history)
+			b.StartTimer()
+			_, _, _ = s.Execute(ctx, deviationStatus)
+		}
+	})
+}
+
+func BenchmarkNormalCDF(b *testing.B) {
+	inputs := []float64{-3.0, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, x := range inputs {
+			normalCDF(x)
+		}
+	}
 }

@@ -158,7 +158,6 @@ Resolution Source: %s
 - Target Value: %s
 Meta:
 %s
-
 Timer: %s
 
 - %s
