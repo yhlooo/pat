@@ -486,10 +486,12 @@ func (trader *UpdownSeriesTrader) simulateMatchingOrders(ctx context.Context, st
 			filledQty := order.Quantity
 			if order.Side == Buy {
 				filledPrice = curPrices.BestAsk
-				filledQty = order.Amount.DivRound(filledPrice, 6)
 			}
 			if filledPrice.IsZero() {
 				continue
+			}
+			if order.Side == Buy {
+				filledQty = order.Amount.DivRound(filledPrice, 6)
 			}
 			status.FillOrder(id, filledPrice, filledQty)
 
