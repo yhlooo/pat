@@ -34,14 +34,22 @@ type Trader interface {
 type Status struct {
 	// 其它元信息
 	Meta map[string]interface{} `json:"meta,omitempty"`
+	// 市场事件延迟情况
+	MarketChannelDelay time.Duration `json:"marketChannelDelay,omitempty"`
+	// RTDS 数据延迟情况
+	RTDSDelay time.Duration `json:"rtdsDelay,omitempty"`
+
 	// 当前正在交易的市场基础信息
 	CurrentMarket Market `json:"currentMarket"`
+
 	// 还未结算的还在监听的市场（键为市场 ConditionID ）
 	WatchingMarkets map[string]Market `json:"watchingMarkets"`
+
 	// 当前市场价格信息
 	Prices MarketPrices `json:"prices"`
 	// 判定来源
 	ResolutionSource ResolutionSource `json:"resolutionSource"`
+
 	// 相对现金量
 	Cash decimal.Decimal `json:"cash"`
 	// 未成交的订单（键为订单 ID ）

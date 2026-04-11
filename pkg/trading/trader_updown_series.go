@@ -219,6 +219,7 @@ func (trader *UpdownSeriesTrader) handleRTDSEvent(
 		))
 		return false
 	}
+	status.RTDSDelay = time.Duration(time.Now().UnixNano() - event.Timestamp*1000000)
 	status.ResolutionSource.Value = decimal.NewFromFloat(event.Payload.Value)
 	return true
 }
@@ -232,6 +233,7 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 ) bool {
 	logger := logr.FromContextOrDiscard(ctx)
 
+	status.MarketChannelDelay = time.Duration(time.Now().UnixNano() - event.CLOBEventMeta.Timestamp*1000000)
 	changed := false
 
 	// 处理市场事件
@@ -239,6 +241,7 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 	case polymarket.EventPriceChange:
 		// 下单/取消导致出价或要价变化
 		eventData := event.PriceChange
+		logger.V(1).Info(fmt.Sprintf("received price change: market: %s", eventData.Market))
 		if eventData.Market == status.CurrentMarket.ConditionID {
 			for _, change := range eventData.PriceChanges {
 				switch change.AssetID {
@@ -249,6 +252,10 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 					status.Prices.No.BestAsk = change.BestAsk
 					status.Prices.No.BestBid = change.BestBid
 				}
+				logger.V(1).Info(fmt.Sprintf(
+					"received price change: market: %s, bestBid: %s, bestAsk: %s",
+					eventData.Market, change.BestBid, change.BestAsk,
+				))
 			}
 			changed = true
 		}
@@ -256,6 +263,10 @@ func (trader *UpdownSeriesTrader) handleMarketChannelEvent(
 	case polymarket.EventLastTradePrice:
 		// 成交导致最近成交价变化
 		eventData := event.LastTradePrice
+		logger.V(1).Info(fmt.Sprintf(
+			"received last trade price: market: %s, price: %s",
+			eventData.Market, eventData.Price,
+		))
 
 		// 更新当前市场价格
 		if eventData.Market == status.CurrentMarket.ConditionID {

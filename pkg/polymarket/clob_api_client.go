@@ -365,8 +365,8 @@ type CLOBEventMeta struct {
 	// new_market: NewMarket
 	// market_resolved: MarketResolved
 	EventType string `json:"event_type"`
-	// 事件 UNIX 时间戳
-	Timestamp string `json:"timestamp"`
+	// 事件 UNIX 时间戳（毫秒）
+	Timestamp int64 `json:"timestamp,string"`
 }
 
 // OrderbookSnapshot 订单簿快照事件

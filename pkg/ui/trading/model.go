@@ -160,6 +160,10 @@ Meta:
 %s
 Timer: %s
 
+Delay:
+- Market Channel: %s
+- RTDS: %s
+
 - %s
   - best bid: %s
   - best ask: %s
@@ -189,6 +193,8 @@ Timer: %s
 		ui.lastStatus.ResolutionSource.TargetValue,
 		meta,
 		ui.curMarket.EndDate.Sub(time.Now()).Round(time.Second).String(),
+		ui.lastStatus.MarketChannelDelay.Round(time.Millisecond).String(),
+		ui.lastStatus.RTDSDelay.Round(time.Millisecond).String(),
 		yes,
 		ui.lastStatus.Prices.Yes.BestBid.StringFixedBank(2),
 		ui.lastStatus.Prices.Yes.BestAsk.StringFixedBank(2),
